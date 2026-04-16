@@ -1,4 +1,4 @@
-package com.antlr.intellij.plugin;
+package com.antlr.plugin;
 
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.ExceptionWithAttachments;

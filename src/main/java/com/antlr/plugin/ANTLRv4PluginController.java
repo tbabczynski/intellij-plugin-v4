@@ -26,13 +26,13 @@ import com.intellij.openapi.progress.util.BackgroundTaskUtil;
 import com.intellij.openapi.progress.util.ProgressWindow;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
-import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.VirtualFileEvent;
-import com.intellij.openapi.vfs.VirtualFileListener;
 import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.openapi.vfs.newvfs.BulkFileListener;
+import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.psi.PsiDocumentManager;
@@ -43,6 +43,7 @@ import org.antlr.v4.tool.LexerGrammar;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -145,7 +146,7 @@ public class ANTLRv4PluginController {
     // problem in switchGrammar. Probably was a listener still attached and trigger
     // editor listeners released in editorReleased() events.
     public void uninstallListeners() {
-        VirtualFileManager.getInstance().removeVirtualFileListener(myVirtualFileAdapter);
+//        VirtualFileManager.getInstance().removeVirtualFileListener(myVirtualFileAdapter);
         if (!project.isDisposed()) {
             MessageBusConnection msgBus = project.getMessageBus().connect(project);
             msgBus.disconnect();
@@ -156,11 +157,14 @@ public class ANTLRv4PluginController {
 
     public void installListeners() {
         LOG.info("installListeners " + project.getName());
-        // Listen for .g4 file saves
-        VirtualFileManager.getInstance().addVirtualFileListener(myVirtualFileAdapter);
+//        VirtualFileManager.getInstance().addVirtualFileListener(myVirtualFileAdapter);
 
-        // Listen for editor window changes
         MessageBusConnection msgBus = project.getMessageBus().connect();
+        // Listen for .g4 file saves
+        msgBus.subscribe(
+                VirtualFileManager.VFS_CHANGES,
+                myVirtualFileAdapter);
+        // Listen for editor window changes
         msgBus.subscribe(
                 FileEditorManagerListener.FILE_EDITOR_MANAGER,
                 myFileEditorManagerAdapter
@@ -604,20 +608,36 @@ public class ANTLRv4PluginController {
         }
     }
 
-    private class MyVirtualFileAdapter implements VirtualFileListener {
+    private class MyVirtualFileAdapter implements BulkFileListener {
         @Override
+        public void after(@NotNull List<? extends @NotNull VFileEvent> events) {
+            if(projectIsClosed || ApplicationManager.getApplication().isUnitTestMode()) return;
+            for(VFileEvent event : events) {
+                if(!(event instanceof VFileContentChangeEvent)) continue;
+                final VirtualFile file = event.getFile();
+                if (!file.getName().endsWith(".g4")) continue;
+                grammarFileSavedEvent(ANTLRv4PluginController.this.project, file);
+            }
+        }
+
+/*        @Override
         public void contentsChanged(VirtualFileEvent event) {
             final VirtualFile file = event.getFile();
             if (!file.getName().endsWith(".g4")) return;
             if (!projectIsClosed && !ApplicationManager.getApplication().isUnitTestMode()) {
                 grammarFileSavedEvent(ANTLRv4PluginController.this.project, file);
             }
-        }
+        }*/
     }
 
     public class MyFileEditorManagerAdapter implements FileEditorManagerListener {
+//        @Override
+//        public void fileOpenedSync(@NotNull FileEditorManager source, @NotNull VirtualFile file, @NotNull Pair<FileEditor[], FileEditorProvider[]> editors) {
+//            currentEditorFileChangedEvent(project, null, file, false);
+//        }
+
         @Override
-        public void fileOpenedSync(@NotNull FileEditorManager source, @NotNull VirtualFile file, @NotNull Pair<FileEditor[], FileEditorProvider[]> editors) {
+        public void fileOpened(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
             currentEditorFileChangedEvent(project, null, file, false);
         }
 

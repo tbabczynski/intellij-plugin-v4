@@ -1,6 +1,6 @@
-package com.antlr.intellij.plugin.editor;
+package com.antlr.plugin.editor;
 
-import com.antlr.intellij.plugin.TestUtils;
+import com.antlr.plugin.TestUtils;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.editor.Document;
@@ -72,7 +72,7 @@ public class Issue540Test extends BasePlatformTestCase {
     }
 
     private String getTestDataGenPath() {
-        return getTestDataPath() + "gen/";
+        return getTestDataPath() + "../gen/";
     }
 
     private void addLineToCurrentFile(String line, VirtualFile file, ANTLRv4PluginController controller) {
@@ -81,7 +81,7 @@ public class Issue540Test extends BasePlatformTestCase {
             doc.setText(doc.getText() + "\n" + line);
             PsiDocumentManager.getInstance(getProject()).commitDocument(doc);
             FileDocumentManager.getInstance().saveDocument(doc);
-            if (controller != null) controller.grammarFileSavedEvent(null,file);
+            if (controller != null) controller.grammarFileSavedEvent(getProject(),file);
         });
     }
 

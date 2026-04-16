@@ -1,7 +1,6 @@
-package com.antlr.intellij.plugin.validation;
+package com.antlr.plugin.validation;
 
-import com.antlr.intellij.plugin.TestUtils;
-import com.antlr.plugin.validation.CreateRuleFix;
+import com.antlr.plugin.TestUtils;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.testFramework.LightPlatformCodeInsightTestCase;
