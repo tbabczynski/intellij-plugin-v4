@@ -1,4 +1,4 @@
-package com.antlr.intellij.plugin.parsing;
+package com.antlr.plugin.parsing;
 
 import com.intellij.openapi.util.io.StreamUtil;
 import junit.framework.TestCase;

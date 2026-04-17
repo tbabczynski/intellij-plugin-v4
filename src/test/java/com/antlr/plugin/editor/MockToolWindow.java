@@ -1,4 +1,4 @@
-package com.antlr.intellij.plugin.editor;
+package com.antlr.plugin.editor;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionGroup;

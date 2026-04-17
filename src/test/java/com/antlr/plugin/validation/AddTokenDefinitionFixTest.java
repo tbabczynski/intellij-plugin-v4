@@ -1,4 +1,4 @@
-package com.antlr.intellij.plugin.validation;
+package com.antlr.plugin.validation;
 
 import com.antlr.plugin.validation.AddTokenDefinitionFix;
 import com.intellij.openapi.util.TextRange;

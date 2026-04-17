@@ -2,12 +2,12 @@
 # libraries
 junit = "4.13.2"
 report = "1.0-SNAPSHOT"
-mockito ="5.8.0"
+mockito ="5.23.0"
 antlr4IntellijAdaptor="0.2-SNAPSHOT"
 
 # plugins
 changelog = "2.2.1"
-intelliJPlatform = "2.7.2"
+intelliJPlatform = "2.13.1"
 kotlin = "2.2.0"
 kover = "0.9.1"
 qodana = "2025.1.1"

@@ -1,4 +1,4 @@
-package com.antlr.intellij.plugin.configdialogs;
+package com.antlr.plugin.configdialogs;
 
 import com.antlr.plugin.configdialogs.ANTLRv4GrammarProperties;
 import com.antlr.plugin.configdialogs.ConfigANTLRPerGrammar;
