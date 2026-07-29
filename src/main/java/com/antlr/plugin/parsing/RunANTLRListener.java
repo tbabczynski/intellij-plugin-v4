@@ -19,6 +19,7 @@ public class RunANTLRListener implements ANTLRToolListener {
     public Tool tool;
     private final Project project;
     public boolean hasOutput = false;
+    public boolean hasErrors = false;
 
     public RunANTLRListener(Tool tool, Project project) {
         this.tool = tool;
@@ -37,6 +38,7 @@ public class RunANTLRListener implements ANTLRToolListener {
 
     @Override
     public void error(ANTLRMessage msg) {
+        hasErrors = true;
         track(msg, ConsoleViewContentType.ERROR_OUTPUT);
     }
 

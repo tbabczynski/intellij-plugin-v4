@@ -47,8 +47,8 @@ public abstract class RuleSpecNode extends ASTWrapperPsiElement implements PsiNa
                 name, getRuleRefType());
         if (id != null && psiElement != null) {
             id.replace(psiElement);
+            this.name = name;
         }
-        this.name = name;
         return this;
     }
 

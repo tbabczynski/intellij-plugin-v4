@@ -56,11 +56,13 @@ public class RunANTLROnGrammarFile extends Task.Modal {
     public static final String OUTPUT_DIR_NAME = "gen";
     public static final String groupDisplayId = "ANTLR 4 Parser Generation";
 
-    private static final Pattern PACKAGE_DEFINITION_REGEX = Pattern.compile("package\\s+[a-z][a-z0-9_]*(\\.[a-z0-9_]+)+[0-9a-z_];");
+    private static final Pattern PACKAGE_DEFINITION_REGEX =
+            Pattern.compile("package\\s+[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)*\\s*;");
 
     private final VirtualFile grammarFile;
     private final Project project;
     private final boolean forceGeneration;
+    private boolean hadErrors;
 
     public RunANTLROnGrammarFile(VirtualFile grammarFile,
                                  @Nullable final Project project,
@@ -71,6 +73,10 @@ public class RunANTLROnGrammarFile extends Task.Modal {
         this.grammarFile = grammarFile;
         this.project = project;
         this.forceGeneration = forceGeneration;
+    }
+
+    public boolean hadErrors() {
+        return hadErrors;
     }
 
     @Override
@@ -92,19 +98,32 @@ public class RunANTLROnGrammarFile extends Task.Modal {
             // is lexer file? gen .tokens file no matter what as tokens might have changed;
             // a parser that feeds off of that file will need to see the changes.
             if (previewState.g == null && previewState.lg != null) {
-                Grammar g = previewState.lg;
-                String language = g.getOptionString(ANTLRv4GrammarProperties.PROP_LANGUAGE);
-                Tool tool = ParsingUtils.createANTLRToolForLoadingGrammars(getGrammarProperties(project, grammarFile));
-                CodeGenerator gen = CodeGenerator.create(tool, g, language);
-                gen.writeVocabFile();
+                writeTokensVocabFile(project, grammarFile, previewState.lg);
             }
+        }
+    }
+
+    /**
+     * Synchronously write the {@code .tokens} vocab file for a lexer grammar.
+     * Used when a lexer save must refresh tokens before the associated parser is reloaded.
+     */
+    public static void writeTokensVocabFile(Project project, VirtualFile grammarFile, Grammar g) {
+        if (project == null || grammarFile == null || g == null) {
+            return;
+        }
+        String language = g.getOptionString(ANTLRv4GrammarProperties.PROP_LANGUAGE);
+        Tool tool = ParsingUtils.createANTLRToolForLoadingGrammars(
+                getGrammarProperties(project, grammarFile), project, grammarFile);
+        CodeGenerator gen = CodeGenerator.create(tool, g, language);
+        if (gen != null) {
+            gen.writeVocabFile();
         }
     }
 
     // TODO: lots of duplication with antlr() function.
     private boolean isGrammarStale(ANTLRv4GrammarProperties grammarProperties) {
-        String sourcePath = grammarProperties.resolveLibDir(project, getParentDir(grammarFile));
-        String fullyQualifiedInputFileName = sourcePath + File.separator + grammarFile.getName();
+        // Grammar file path is always next to the .g4 file; libDir is for imports/tokenVocab only
+        String fullyQualifiedInputFileName = getParentDir(grammarFile) + File.separator + grammarFile.getName();
 
         ANTLRv4PluginController controller = ANTLRv4PluginController.getInstance(project);
         if (controller == null) {
@@ -122,13 +141,18 @@ public class RunANTLROnGrammarFile extends Task.Modal {
         String recognizerFileName = generator.getRecognizerFileName();
 
         VirtualFile contentRoot = getContentRoot(project, grammarFile);
-        String package_ = grammarProperties.getPackage();
+        // Match package used by getANTLRArgs (configured or inferred)
+        Map<String, String> argMap = getANTLRArgs(project, grammarFile);
+        String package_ = argMap.get("-package");
+        if (package_ == null) {
+            package_ = grammarProperties.getPackage();
+        }
         String outputDirName = grammarProperties.resolveOutputDirName(project, contentRoot, package_);
         String fullyQualifiedOutputFileName = outputDirName + File.separator + recognizerFileName;
 
         File inF = new File(fullyQualifiedInputFileName);
         File outF = new File(fullyQualifiedOutputFileName);
-        boolean stale = inF.lastModified() > outF.lastModified();
+        boolean stale = !outF.exists() || inF.lastModified() > outF.lastModified();
         LOG.info((!stale ? "not" : "") + "stale: " + fullyQualifiedInputFileName + " -> " + fullyQualifiedOutputFileName);
         return stale;
     }
@@ -166,6 +190,7 @@ public class RunANTLROnGrammarFile extends Task.Modal {
 
         try {
             antlr.processGrammarsOnCommandLine();
+            hadErrors = listener.hasErrors;
         } catch (Throwable e) {
             StringWriter sw = new StringWriter();
             PrintWriter pw = new PrintWriter(sw);
@@ -175,10 +200,11 @@ public class RunANTLROnGrammarFile extends Task.Modal {
                     new Notification(groupDisplayId,
                             "can't generate parser for " + vfile.getName(),
                             e.toString(),
-                            NotificationType.INFORMATION);
+                            NotificationType.ERROR);
             Notifications.Bus.notify(notification, project);
             ConsoleUtils.consolePrint(project, timeStamp + ": antlr4 " + msg + "\n", ConsoleViewContentType.SYSTEM_OUTPUT);
             listener.hasOutput = true; // show console below
+            hadErrors = true;
         }
 
         if (listener.hasOutput) {
@@ -208,9 +234,10 @@ public class RunANTLROnGrammarFile extends Task.Modal {
             package_ = grammarProperties.getPackage();
         }
         if (isBlank(package_) && !hasPackageDeclarationInHeader(project, vfile) && vfile.getParent() != null) {
-//            final String packageName = PackageIndex.getInstance(myProject).getPackageNameByDirectory(containingDirectory);
-
-            package_ = ProjectRootManager.getInstance(project).getFileIndex().getPackageNameByDirectory(vfile.getParent());
+            // ProjectFileIndex requires a read action; this may run on a background Progress thread
+            final VirtualFile parentDir = vfile.getParent();
+            package_ = ReadAction.compute(() ->
+                    ProjectRootManager.getInstance(project).getFileIndex().getPackageNameByDirectory(parentDir));
         }
         if (isNotBlank(package_)) {
             args.put("-package", package_);
@@ -224,18 +251,20 @@ public class RunANTLROnGrammarFile extends Task.Modal {
         // create gen dir at root of project by default, but add in package if any
         VirtualFile contentRoot = getContentRoot(project, vfile);
         String outputDirName = grammarProperties != null ? grammarProperties.resolveOutputDirName(project, contentRoot, package_) : null;
-        args.put("-o", outputDirName);
+        if (isNotBlank(outputDirName)) {
+            args.put("-o", outputDirName);
+        }
 
         String libDir = grammarProperties != null ? grammarProperties.resolveLibDir(project, sourcePath) : null;
-        File f;
         if (libDir != null) {
-            f = new File(libDir);
+            File f = new File(libDir);
             if (!f.isAbsolute() && contentRoot != null) { // if not absolute file spec, it's relative to project root
                 libDir = contentRoot.getPath() + File.separator + libDir;
             }
         }
-
-        args.put("-lib", libDir);
+        if (isNotBlank(libDir)) {
+            args.put("-lib", libDir);
+        }
 
         String encoding = grammarProperties != null ? grammarProperties.getEncoding() : null;
         if (isNotBlank(encoding)) {
@@ -312,7 +341,10 @@ public class RunANTLROnGrammarFile extends Task.Modal {
         Map<String, String> argMap = getANTLRArgs(project, grammarFile);
         String package_ = argMap.get("-package");
 
-        return getGrammarProperties(project, grammarFile)
-                .resolveOutputDirName(project, contentRoot, package_);
+        ANTLRv4GrammarProperties props = getGrammarProperties(project, grammarFile);
+        if (props == null) {
+            return OUTPUT_DIR_NAME;
+        }
+        return props.resolveOutputDirName(project, contentRoot, package_);
     }
 }

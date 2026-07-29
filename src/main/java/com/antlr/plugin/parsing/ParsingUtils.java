@@ -209,8 +209,11 @@ public class ParsingUtils {
         }
 
         ANTLRv4GrammarProperties grammarProperties = getGrammarProperties(project, grammarFile);
-        CharStream input = grammarProperties.getCaseChangingStrategy()
-                .applyTo(CharStreams.fromString(inputText, grammarFile.getPath()));
+        CaseChangingStrategy strategy = grammarProperties != null
+                ? grammarProperties.getCaseChangingStrategy()
+                : CaseChangingStrategy.LEAVE_AS_IS;
+        String sourceName = grammarFile != null ? grammarFile.getPath() : "<input>";
+        CharStream input = strategy.applyTo(CharStreams.fromString(inputText, sourceName));
         LexerInterpreter lexEngine;
         lexEngine = lg.createLexerInterpreter(input);
         SyntaxErrorListener syntaxErrorListener = new SyntaxErrorListener();
@@ -257,15 +260,27 @@ public class ParsingUtils {
         return null;
     }
 
-    public static Tool createANTLRToolForLoadingGrammars(ANTLRv4GrammarProperties grammarProperties) {
+    public static Tool createANTLRToolForLoadingGrammars(ANTLRv4GrammarProperties grammarProperties,
+                                                         Project project,
+                                                         VirtualFile grammarFile) {
         Tool antlr = new Tool();
         antlr.errMgr = new PluginIgnoreMissingTokensFileErrorManager(antlr);
         antlr.errMgr.setFormat("antlr");
         LoadGrammarsToolListener listener = new LoadGrammarsToolListener(antlr);
         antlr.removeListeners();
         antlr.addListener(listener);
-        if(grammarProperties!=null){
-            antlr.libDirectory = grammarProperties.getLibDir();
+        if (grammarProperties != null) {
+            String defaultLib = ".";
+            if (grammarFile != null && grammarFile.getParent() != null) {
+                defaultLib = grammarFile.getParent().getPath();
+            }
+            // Resolve macros / relative paths the same way codegen does
+            if (project != null) {
+                antlr.libDirectory = grammarProperties.resolveLibDir(project, defaultLib);
+            } else {
+                String lib = grammarProperties.getLibDir();
+                antlr.libDirectory = (lib == null || lib.isEmpty()) ? defaultLib : lib;
+            }
         }
         return antlr;
     }
@@ -278,7 +293,7 @@ public class ParsingUtils {
             return null;
         }
         LOG.info("loadGrammars " + grammarFile.getPath() + " " + project.getName());
-        Tool antlr = createANTLRToolForLoadingGrammars(getGrammarProperties(project, grammarFile));
+        Tool antlr = createANTLRToolForLoadingGrammars(getGrammarProperties(project, grammarFile), project, grammarFile);
         LoadGrammarsToolListener listener = (LoadGrammarsToolListener) antlr.getListeners().get(0);
 
         Grammar g = loadGrammar(grammarFile, antlr);
@@ -364,13 +379,13 @@ public class ParsingUtils {
                 documentAtomicReference.set(null);
             }
         });
-        if (documentAtomicReference.get() == null) {
-            return atomicReference.get();
-        }
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
-                String grammarText = documentAtomicReference.get() != null ? documentAtomicReference.get().getText() : new String(grammarFile.contentsToByteArray());
+                Document document = documentAtomicReference.get();
+                String grammarText = document != null
+                        ? document.getText()
+                        : new String(grammarFile.contentsToByteArray());
                 ANTLRStringStream in = new ANTLRStringStream(grammarText);
                 in.name = grammarFile.getPath();
                 atomicReference.set(antlr.parse(grammarFile.getPath(), in));
@@ -395,15 +410,17 @@ public class ParsingUtils {
      * XLexer given grammar name X
      */
     public static LexerGrammar loadLexerGrammarFor(Grammar g, Project project) {
-        Tool antlr = createANTLRToolForLoadingGrammars(getGrammarProperties(project, g.fileName));
+        VirtualFile parserGrammarFile = LocalFileSystem.getInstance().findFileByIoFile(new File(g.fileName));
+        Tool antlr = createANTLRToolForLoadingGrammars(
+                getGrammarProperties(project, g.fileName), project, parserGrammarFile);
         LoadGrammarsToolListener listener = (LoadGrammarsToolListener) antlr.getListeners().get(0);
         LexerGrammar lg = null;
         VirtualFile lexerGrammarFile;
 
         String vocabName = g.getOptionString("tokenVocab");
         if (vocabName != null) {
-            VirtualFile grammarFile = LocalFileSystem.getInstance().findFileByIoFile(new File(g.fileName));
-            lexerGrammarFile = VfsUtil.findRelativeFile(grammarFile == null ? null : grammarFile.getParent(), vocabName + ".g4");
+            lexerGrammarFile = VfsUtil.findRelativeFile(
+                    parserGrammarFile == null ? null : parserGrammarFile.getParent(), vocabName + ".g4");
         } else {
             lexerGrammarFile = LocalFileSystem.getInstance().findFileByIoFile(new File(getLexerNameFromParserFileName(g.fileName)));
         }
@@ -439,19 +456,17 @@ public class ParsingUtils {
 
     @NotNull
     public static String getLexerNameFromParserFileName(String parserFileName) {
-        String lexerGrammarFileName;
-        int i = parserFileName.indexOf("Parser.g4");
+        File f = new File(parserFileName);
+        String name = f.getName();
+        // Match on filename only so path segments like ".../Parser.g4/..." cannot false-match
+        int i = name.indexOf("Parser.g4");
+        File parentDir = f.getParentFile();
         if (i >= 0) { // is filename XParser.g4?
-            lexerGrammarFileName = parserFileName.substring(0, i) + "Lexer.g4";
-        } else { // if not, try using the grammar name, XLexer.g4
-            File f = new File(parserFileName);
-            String name = f.getName();
-            int dot = name.lastIndexOf(".g4");
-            String parserName = name.substring(0, dot);
-            File parentDir = f.getParentFile();
-            lexerGrammarFileName = new File(parentDir, parserName + "Lexer.g4").getAbsolutePath();
+            return new File(parentDir, name.substring(0, i) + "Lexer.g4").getAbsolutePath();
         }
-        return lexerGrammarFileName;
+        int dot = name.lastIndexOf(".g4");
+        String parserName = dot >= 0 ? name.substring(0, dot) : name;
+        return new File(parentDir, parserName + "Lexer.g4").getAbsolutePath();
     }
 
     public static Tree findOverriddenDecisionRoot(Tree ctx) {

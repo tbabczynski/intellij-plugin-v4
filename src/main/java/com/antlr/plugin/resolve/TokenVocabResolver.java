@@ -8,7 +8,6 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.antlr.plugin.ANTLRv4FileRoot;
 import com.antlr.plugin.parser.ANTLRv4Parser;
 import com.antlr.plugin.psi.*;
-import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.Nullable;
 
 import static com.antlr.plugin.ANTLRv4TokenTypes.RULE_ELEMENT_TYPES;
@@ -30,8 +29,8 @@ public class TokenVocabResolver {
             if (option != null) {
                 PsiElement optionName = PsiTreeUtil.getDeepestFirst(option);
 
-                if (optionName.getText().equals("tokenVocab")) {
-                    String text = StringUtils.strip(reference.getText(), "'");
+                if (optionName != null && "tokenVocab".equals(optionName.getText())) {
+                    String text = MyPsiUtils.stripQuotes(reference.getText());
                     return findRelativeFile(text, reference.getContainingFile());
                 }
             }
@@ -45,10 +44,14 @@ public class TokenVocabResolver {
      */
     @Nullable
     public static PsiElement resolveInTokenVocab(GrammarElementRefNode reference, String ruleName) {
-        String tokenVocab = MyPsiUtils.findTokenVocabIfAny((ANTLRv4FileRoot) reference.getContainingFile());
+        PsiFile containingFile = reference.getContainingFile();
+        if (!(containingFile instanceof ANTLRv4FileRoot)) {
+            return null;
+        }
+        String tokenVocab = MyPsiUtils.findTokenVocabIfAny((ANTLRv4FileRoot) containingFile);
 
         if (tokenVocab != null) {
-            PsiFile tokenVocabFile = findRelativeFile(tokenVocab, reference.getContainingFile());
+            PsiFile tokenVocabFile = findRelativeFile(tokenVocab, containingFile);
 
             if (tokenVocabFile != null) {
                 GrammarSpecNode lexerGrammar = PsiTreeUtil.findChildOfType(tokenVocabFile, GrammarSpecNode.class);

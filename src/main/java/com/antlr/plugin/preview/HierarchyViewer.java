@@ -3,7 +3,6 @@ package com.antlr.plugin.preview;
 import com.intellij.ui.components.JBScrollPane;
 import com.antlr.plugin.Icons;
 import org.antlr.v4.gui.TreeTextProvider;
-import org.antlr.v4.gui.TreeViewer;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ParseTree;
@@ -64,7 +63,7 @@ public class HierarchyViewer extends JPanel implements TreeSelectionListener {
     }
 
     public void setRuleNames(List<String> ruleNames) {
-        treeTextProvider = new TreeViewer.DefaultTreeTextProvider(ruleNames);
+        treeTextProvider = new DefaultRuleTreeTextProvider(ruleNames);
     }
 
     public void setTreeTextProvider(TreeTextProvider treeTextProvider) {

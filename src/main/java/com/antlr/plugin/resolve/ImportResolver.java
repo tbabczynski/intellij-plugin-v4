@@ -10,6 +10,7 @@ import com.antlr.plugin.psi.GrammarElementRefNode;
 import com.antlr.plugin.psi.GrammarSpecNode;
 import com.antlr.plugin.psi.MyPsiUtils;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,10 +25,28 @@ public class ImportResolver {
         PsiElement importStatement = PsiTreeUtil.findFirstParent(reference, ImportResolver::isImportStatement);
 
         if (importStatement != null) {
-            return findRelativeFile(reference.getText(), reference.getContainingFile());
+            // Always resolve to the RHS grammar name for import Alias=Foo
+            String fileName = resolveImportFileName(importStatement);
+            if (fileName != null) {
+                return findRelativeFile(fileName, reference.getContainingFile());
+            }
         }
 
         return null;
+    }
+
+    /**
+     * Resolve the imported grammar file name from a {@code delegateGrammar} node.
+     * Supports both {@code import Foo;} and {@code import Alias=Foo;}.
+     */
+    @Nullable
+    static String resolveImportFileName(PsiElement delegateGrammar) {
+        // Prefer the last identifier / rule-ref leaf (RHS of Alias=Name)
+        PsiElement deepest = PsiTreeUtil.getDeepestLast(delegateGrammar);
+        if (deepest != null && deepest != delegateGrammar) {
+            return MyPsiUtils.stripQuotes(deepest.getText());
+        }
+        return MyPsiUtils.stripQuotes(delegateGrammar.getText());
     }
 
     private static boolean isImportStatement(PsiElement el) {
@@ -73,10 +92,13 @@ public class ImportResolver {
         @Override
         public void visitElement(@NotNull PsiElement element) {
             if (isImportStatement(element)) {
-                PsiFile importedGrammar = findRelativeFile(element.getText(), element.getContainingFile());
+                String fileName = resolveImportFileName(element);
+                if (fileName != null) {
+                    PsiFile importedGrammar = findRelativeFile(fileName, element.getContainingFile());
 
-                if (importedGrammar != null) {
-                    importedGrammars.add(importedGrammar);
+                    if (importedGrammar != null) {
+                        importedGrammars.add(importedGrammar);
+                    }
                 }
             }
             super.visitElement(element);

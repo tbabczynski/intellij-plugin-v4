@@ -37,7 +37,8 @@ public class ANTLRv4TokenTypes {
                     ANTLRv4Lexer.LEXER, ANTLRv4Lexer.PROTECTED, ANTLRv4Lexer.IMPORT, ANTLRv4Lexer.CATCH,
                     ANTLRv4Lexer.PRIVATE, ANTLRv4Lexer.FRAGMENT, ANTLRv4Lexer.PUBLIC, ANTLRv4Lexer.MODE,
                     ANTLRv4Lexer.FINALLY, ANTLRv4Lexer.RETURNS, ANTLRv4Lexer.THROWS, ANTLRv4Lexer.GRAMMAR,
-                    ANTLRv4Lexer.LOCALS, ANTLRv4Lexer.PARSER);
+                    ANTLRv4Lexer.LOCALS, ANTLRv4Lexer.PARSER,
+                    ANTLRv4Lexer.OPTIONS, ANTLRv4Lexer.TOKENS, ANTLRv4Lexer.CHANNELS);
 
     public static RuleIElementType getRuleElementType(@MagicConstant(valuesFromClass = ANTLRv4Parser.class) int ruleIndex) {
         return RULE_ELEMENT_TYPES.get(ruleIndex);

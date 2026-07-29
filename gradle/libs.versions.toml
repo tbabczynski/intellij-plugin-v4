@@ -2,22 +2,22 @@
 # libraries
 junit = "4.13.2"
 report = "1.0-SNAPSHOT"
-mockito ="5.8.0"
-antlr4IntellijAdaptor="0.2-SNAPSHOT"
+mockito = "5.23.0"
+antlr4IntellijAdaptor = "0.2-SNAPSHOT"
 
-# plugins
-changelog = "2.2.1"
-intelliJPlatform = "2.7.2"
-kotlin = "2.2.0"
-kover = "0.9.1"
-qodana = "2025.1.1"
+# plugins — 2.10+ needs Gradle 8.13; 2.12+ needs Gradle 9. Stay on 2.9.x with Gradle 8.11.1
+changelog = "2.5.0"
+intelliJPlatform = "2.9.0"
+kotlin = "2.3.21"
+kover = "0.9.9"
+qodana = "2026.1.3"
 
 
 [libraries]
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 report = { group = "com.github", name = "report-issue", version.ref = "report" }
-mockito ={group="org.mockito",name="mockito-core", version.ref="mockito"}
-antlr4IntellijAdaptor={group="org.antlr",name="antlr4-intellij-adaptor",version.ref="antlr4IntellijAdaptor"}
+mockito = { group = "org.mockito", name = "mockito-core", version.ref = "mockito" }
+antlr4IntellijAdaptor = { group = "org.antlr", name = "antlr4-intellij-adaptor", version.ref = "antlr4IntellijAdaptor" }
 
 [plugins]
 changelog = { id = "org.jetbrains.changelog", version.ref = "changelog" }
@@ -25,4 +25,3 @@ intelliJPlatform = { id = "org.jetbrains.intellij.platform", version.ref = "inte
 kotlin = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
 qodana = { id = "org.jetbrains.qodana", version.ref = "qodana" }
-

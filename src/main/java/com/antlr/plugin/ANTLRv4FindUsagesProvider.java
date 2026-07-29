@@ -50,6 +50,9 @@ public class ANTLRv4FindUsagesProvider implements FindUsagesProvider {
     @NotNull
     @Override
     public String getDescriptiveName(@NotNull PsiElement element) {
+        if (element instanceof RuleSpecNode) {
+            return ((RuleSpecNode) element).getName();
+        }
         PsiElement rule = PsiTreeUtil.findChildOfAnyType(element, LexerRuleRefNode.class, ParserRuleRefNode.class);
         if (rule != null) return rule.getText();
         return "n/a";

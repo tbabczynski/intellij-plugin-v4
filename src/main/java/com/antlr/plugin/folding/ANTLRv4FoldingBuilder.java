@@ -11,7 +11,6 @@ import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.impl.source.SourceTreeToPsiMap;
 import com.intellij.psi.impl.source.tree.TreeUtil;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.psi.tree.TokenSet;
 import com.intellij.psi.util.PsiTreeUtil;
 import org.antlr.intellij.adaptor.lexer.RuleIElementType;
 import org.antlr.intellij.adaptor.lexer.TokenIElementType;
@@ -47,12 +46,6 @@ public class ANTLRv4FoldingBuilder extends CustomFoldingBuilder {
 
     private static final TokenIElementType RBRACE = ANTLRv4TokenTypes.getTokenElementType(ANTLRv4Lexer.RBRACE);
     private static final TokenIElementType SEMICOLON = ANTLRv4TokenTypes.getTokenElementType(ANTLRv4Lexer.SEMI);
-
-    private static final TokenSet RULE_BLOCKS = TokenSet.create(
-            ANTLRv4TokenTypes.getRuleElementType(ANTLRv4Parser.RULE_lexerBlock),
-            ANTLRv4TokenTypes.getRuleElementType(ANTLRv4Parser.RULE_ruleBlock)
-    );
-
 
     @Override
     protected void buildLanguageFoldRegions(@NotNull List<FoldingDescriptor> descriptors,
@@ -127,6 +120,7 @@ public class ANTLRv4FoldingBuilder extends CustomFoldingBuilder {
     private static void addActionFoldingDescriptors(List<FoldingDescriptor> descriptors, PsiElement root) {
         for (AtAction atAction : PsiTreeUtil.findChildrenOfType(root, AtAction.class)) {
             PsiElement action = atAction.getLastChild();
+            if (action == null) continue;
             String actionText = action.getText();
             if (actionText != null && actionText.contains("\n")) {
                 descriptors.add(new FoldingDescriptor(atAction, action.getTextRange()));
@@ -164,17 +158,19 @@ public class ANTLRv4FoldingBuilder extends CustomFoldingBuilder {
     }
 
     private static boolean isComment(PsiElement element) {
+        if (element == null || element.getNode() == null) {
+            return false;
+        }
         IElementType type = element.getNode().getElementType();
         return ANTLRv4TokenTypes.COMMENTS.contains(type);
     }
 
-    @SuppressWarnings("ConstantConditions")
     @Nullable
     private static TextRange getFileHeader(PsiElement file) {
         PsiElement first = file.getFirstChild();
         if (first instanceof PsiWhiteSpace) first = first.getNextSibling();
         PsiElement element = first;
-        while (isComment(element)) {
+        while (element != null && isComment(element)) {
             element = element.getNextSibling();
             if (element instanceof PsiWhiteSpace) {
                 element = element.getNextSibling();
@@ -201,7 +197,10 @@ public class ANTLRv4FoldingBuilder extends CustomFoldingBuilder {
 
         ANTLRv4FoldingSettings settings = ANTLRv4FoldingSettings.getInstance();
 
-        if (RULE_BLOCKS.contains(node.getElementType())) return settings.isCollapseRuleBlocks();
+        // Fold regions are keyed to RuleSpecNode PSI (not lexerBlock/ruleBlock AST nodes)
+        if (element instanceof RuleSpecNode && !(element instanceof ModeSpecNode)) {
+            return settings.isCollapseRuleBlocks();
+        }
         if (node.getElementType() == TOKENSSPEC) return settings.isCollapseTokens();
 
         if (element instanceof AtAction) return settings.isCollapseActions();

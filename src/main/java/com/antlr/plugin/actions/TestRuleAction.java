@@ -9,9 +9,12 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.DumbAware;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.antlr.plugin.ANTLRv4PluginController;
+import com.antlr.plugin.preview.PreviewState;
 import com.antlr.plugin.psi.ParserRuleRefNode;
+import com.antlr.plugin.toolwindow.PreViewToolWindow;
 import org.jetbrains.annotations.NotNull;
 
 public class TestRuleAction extends AnAction implements DumbAware {
@@ -56,34 +59,50 @@ public class TestRuleAction extends AnAction implements DumbAware {
 
     @Override
     public void actionPerformed(final AnActionEvent e) {
-        if (e.getProject() == null) {
+        Project project = e.getProject();
+        if (project == null) {
             LOG.error("actionPerformed no project for " + e);
-            return; // whoa!
+            return;
         }
         VirtualFile grammarFile = MyActionUtils.getGrammarFileFromEvent(e);
         if (grammarFile == null) return;
 
-        LOG.info("actionPerformed " + grammarFile);
-
-        ANTLRv4PluginController controller = ANTLRv4PluginController.getInstance(e.getProject());
-        if (controller != null) {
-            controller.showPre(null);
-            controller.currentEditorFileChangedEvent(e.getProject(),null, grammarFile, false);
-        }
-
         ParserRuleRefNode r = MyActionUtils.getParserRuleSurroundingRef(e);
         if (r == null) {
-            return; // weird. no rule name.
+            return;
         }
         String ruleName = r.getText();
+        LOG.info("actionPerformed " + grammarFile + " rule " + ruleName);
+
         FileDocumentManager docMgr = FileDocumentManager.getInstance();
         Document doc = docMgr.getDocument(grammarFile);
         if (doc != null) {
             docMgr.saveDocument(doc);
         }
-        if (controller != null) {
-            controller.setStartRuleNameEvent(grammarFile, ruleName);
-        }
-    }
 
+        ANTLRv4PluginController controller = ANTLRv4PluginController.getInstance(project);
+        if (controller == null) {
+            return;
+        }
+
+        // Set start rule before showing/loading so async grammar load picks it up
+        PreviewState previewState = controller.getPreviewState(grammarFile);
+        previewState.startRuleName = ruleName;
+
+        // Wait until the tool window is shown (content created) before loading/parsing
+        controller.showPre(() -> {
+            if (project.isDisposed()) {
+                return;
+            }
+            project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC)
+                    .setStartRuleName(grammarFile, ruleName);
+            controller.currentEditorFileChangedEvent(project, null, grammarFile, false);
+            // If grammars are already loaded, parse immediately; otherwise the async
+            // grammarFileChanged callback will parse using the startRuleName set above.
+            if (previewState.g != null && previewState.lg != null) {
+                project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC)
+                        .updateParseTreeFromDoc(grammarFile);
+            }
+        });
+    }
 }

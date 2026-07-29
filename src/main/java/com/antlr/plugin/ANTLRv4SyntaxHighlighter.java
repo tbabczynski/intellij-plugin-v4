@@ -30,7 +30,9 @@ public class ANTLRv4SyntaxHighlighter extends SyntaxHighlighterBase {
 
     private static final TextAttributesKey[] BAD_CHAR_KEYS = pack(HighlighterColors.BAD_CHARACTER);
     private static final TextAttributesKey[] STRING_KEYS = pack(STRING);
-    private static final TextAttributesKey[] COMMENT_KEYS = new TextAttributesKey[]{LINE_COMMENT, DOC_COMMENT, BLOCK_COMMENT};
+    private static final TextAttributesKey[] LINE_COMMENT_KEYS = pack(LINE_COMMENT);
+    private static final TextAttributesKey[] DOC_COMMENT_KEYS = pack(DOC_COMMENT);
+    private static final TextAttributesKey[] BLOCK_COMMENT_KEYS = pack(BLOCK_COMMENT);
     private static final TextAttributesKey[] EMPTY_KEYS = new TextAttributesKey[0];
 
     @NotNull
@@ -55,11 +57,11 @@ public class ANTLRv4SyntaxHighlighter extends SyntaxHighlighterBase {
                 || tokenType == ANTLRv4TokenTypes.TOKEN_ELEMENT_TYPES.get(ANTLRv4Lexer.UNTERMINATED_STRING_LITERAL)) {
             return STRING_KEYS;
         } else if (tokenType == ANTLRv4TokenTypes.TOKEN_ELEMENT_TYPES.get(ANTLRv4Lexer.BLOCK_COMMENT)) {
-            return COMMENT_KEYS;
+            return BLOCK_COMMENT_KEYS;
         } else if (tokenType == ANTLRv4TokenTypes.TOKEN_ELEMENT_TYPES.get(ANTLRv4Lexer.DOC_COMMENT)) {
-            return COMMENT_KEYS;
+            return DOC_COMMENT_KEYS;
         } else if (tokenType == ANTLRv4TokenTypes.TOKEN_ELEMENT_TYPES.get(ANTLRv4Lexer.LINE_COMMENT)) {
-            return COMMENT_KEYS;
+            return LINE_COMMENT_KEYS;
         } else if (tokenType == ANTLRv4TokenTypes.BAD_TOKEN_TYPE) {
             return BAD_CHAR_KEYS;
         } else {

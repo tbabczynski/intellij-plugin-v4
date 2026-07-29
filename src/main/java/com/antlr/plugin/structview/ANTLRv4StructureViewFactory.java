@@ -45,7 +45,7 @@ public class ANTLRv4StructureViewFactory implements PsiStructureViewFactory {
                 if (grammarFile == null || !grammarFile.getName().endsWith(".g4")) {
                     return new StructureViewModelBase(psiFile, new DummyViewTreeElement(psiFile));
                 }
-                return new ANTLRv4StructureViewModel((ANTLRv4FileRoot) psiFile);
+                return new ANTLRv4StructureViewModel((ANTLRv4FileRoot) psiFile, editor);
             }
         };
     }

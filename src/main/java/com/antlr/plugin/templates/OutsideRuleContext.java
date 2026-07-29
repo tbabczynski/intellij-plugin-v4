@@ -10,6 +10,7 @@ import org.jetbrains.annotations.NotNull;
 
 public class OutsideRuleContext extends ANTLRLiveTemplateContext {
     public OutsideRuleContext() {
+        // Suffix "-Tool" avoids clashing with upstream org.antlr.intellij.plugin contexts
         super("ANTLR_OUTSIDE-Tool", "Outside rule", ANTLRGenericContext.class);
     }
 

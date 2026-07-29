@@ -9,6 +9,7 @@ import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReferenceBase;
+import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
@@ -35,11 +36,15 @@ public class GrammarElementRef extends PsiReferenceBase<GrammarElementRefNode> {
     @NotNull
     @Override
     public Object[] getVariants() {
-        RulesNode rules = PsiTreeUtil.getContextOfType(myElement, RulesNode.class);
-        // find all rule defs (token, parser)
+        GrammarSpecNode grammar = PsiTreeUtil.getContextOfType(myElement, GrammarSpecNode.class);
+        if (grammar == null) {
+            return new Object[0];
+        }
+        // Search whole grammar so refs inside modes / tokens / channels also complete
         Collection<? extends RuleSpecNode> ruleSpecNodes =
-                PsiTreeUtil.findChildrenOfAnyType(rules, ParserRuleSpecNode.class, LexerRuleSpecNode.class);
-
+                PsiTreeUtil.findChildrenOfAnyType(grammar,
+                        ParserRuleSpecNode.class, LexerRuleSpecNode.class, ModeSpecNode.class,
+                        TokenSpecNode.class, ChannelSpecNode.class);
         return ruleSpecNodes.toArray();
     }
 
@@ -61,6 +66,9 @@ public class GrammarElementRef extends PsiReferenceBase<GrammarElementRefNode> {
         }
 
         GrammarSpecNode grammar = PsiTreeUtil.getContextOfType(getElement(), GrammarSpecNode.class);
+        if (grammar == null) {
+            return null;
+        }
         PsiElement specNode = MyPsiUtils.findSpecNode(grammar, ruleName);
 
         if (specNode != null) {
@@ -68,10 +76,12 @@ public class GrammarElementRef extends PsiReferenceBase<GrammarElementRefNode> {
         }
 
         // Look for a rule defined in an imported grammar
-        specNode = ImportResolver.resolveInImportedFiles(getElement().getContainingFile(), ruleName);
-
-        if (specNode != null) {
-            return specNode;
+        PsiFile containingFile = getElement().getContainingFile();
+        if (containingFile != null) {
+            specNode = ImportResolver.resolveInImportedFiles(containingFile, ruleName);
+            if (specNode != null) {
+                return specNode;
+            }
         }
 
         // Look for a lexer rule in the tokenVocab file if it exists
@@ -85,10 +95,16 @@ public class GrammarElementRef extends PsiReferenceBase<GrammarElementRefNode> {
     @Override
     public PsiElement handleElementRename(@NotNull String newElementName) throws IncorrectOperationException {
         Project project = getElement().getProject();
-        myElement.replace(MyPsiUtils.createLeafFromText(project,
+        IElementType tokenType = getElement() instanceof ParserRuleRefNode
+                ? ANTLRv4TokenTypes.TOKEN_ELEMENT_TYPES.get(ANTLRv4Lexer.RULE_REF)
+                : ANTLRv4TokenTypes.TOKEN_ELEMENT_TYPES.get(ANTLRv4Lexer.TOKEN_REF);
+        PsiElement replacement = MyPsiUtils.createLeafFromText(project,
                 myElement.getContext(),
                 newElementName,
-                ANTLRv4TokenTypes.TOKEN_ELEMENT_TYPES.get(ANTLRv4Lexer.TOKEN_REF)));
+                tokenType);
+        if (replacement != null) {
+            return myElement.replace(replacement);
+        }
         return myElement;
     }
 

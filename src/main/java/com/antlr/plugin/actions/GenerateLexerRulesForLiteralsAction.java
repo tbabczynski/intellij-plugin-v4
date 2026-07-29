@@ -53,7 +53,9 @@ public class GenerateLexerRulesForLiteralsAction extends AnAction {
         PsiElement selectedElement = BaseRefactoringAction.getElementAtCaret(editor, file);
         if (selectedElement == null) { // we clicked somewhere outside text
             presentation.setEnabled(false);
+            return;
         }
+        presentation.setEnabled(true);
     }
 
     @Override
@@ -65,8 +67,16 @@ public class GenerateLexerRulesForLiteralsAction extends AnAction {
         if (psiFile == null) {
             return;
         }
+        final Editor editor = e.getData(PlatformDataKeys.EDITOR);
+        if (editor == null) {
+            return;
+        }
+
         String inputText = psiFile.getText();
         ParsingResult results = ParsingUtils.parseANTLRGrammar(inputText);
+        if (results == null || results.tree == null || results.parser == null) {
+            return;
+        }
 
         final Parser parser = results.parser;
         final ParseTree tree = results.tree;
@@ -97,7 +107,6 @@ public class GenerateLexerRulesForLiteralsAction extends AnAction {
         List<String> selectedElements = chooser.getSelectedElements();
         // chooser disposed automatically.
 
-        final Editor editor = e.getData(PlatformDataKeys.EDITOR);
         final Document doc = editor.getDocument();
         final CommonTokenStream tokens = (CommonTokenStream) parser.getTokenStream();
         if (selectedElements != null) {

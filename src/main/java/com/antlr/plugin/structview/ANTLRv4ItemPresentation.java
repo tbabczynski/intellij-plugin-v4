@@ -11,6 +11,7 @@ import com.antlr.plugin.psi.GrammarElementRefNode;
 import com.antlr.plugin.psi.GrammarSpecNode;
 import com.antlr.plugin.psi.ModeSpecNode;
 import com.antlr.plugin.psi.MyPsiUtils;
+import com.antlr.plugin.psi.RuleSpecNode;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -46,8 +47,11 @@ public class ANTLRv4ItemPresentation implements ItemPresentation {
             }
             return "<n/a>";
         }
+        if (element instanceof RuleSpecNode ruleSpec) {
+            return ruleSpec.getName();
+        }
         ASTNode node = element.getNode();
-        return node.getText();
+        return node != null ? node.getText() : "<n/a>";
     }
 
     @Nullable

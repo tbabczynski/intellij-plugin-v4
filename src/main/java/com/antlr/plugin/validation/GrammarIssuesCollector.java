@@ -1,6 +1,7 @@
 package com.antlr.plugin.validation;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
@@ -31,10 +32,17 @@ public class GrammarIssuesCollector {
     public static final Logger LOG = Logger.getInstance(GrammarIssuesCollector.class.getName());
 
     public static List<GrammarIssue> collectGrammarIssues(PsiFile file) {
-        String grammarFileName = file.getVirtualFile().getPath();
+        VirtualFile virtualFile = file.getVirtualFile();
+        if (virtualFile == null) {
+            return Collections.emptyList();
+        }
+        String grammarFileName = virtualFile.getPath();
         LOG.info("doAnnotate " + grammarFileName);
-        String fileContents = file.getText();
-        List<String> args = RunANTLROnGrammarFile.getANTLRArgsAsList(file.getProject(), file.getVirtualFile());
+
+        // Keep read-action scope short: only PSI / VFS access
+        String fileContents = ReadAction.compute(file::getText);
+        List<String> args = ReadAction.compute(
+                () -> RunANTLROnGrammarFile.getANTLRArgsAsList(file.getProject(), virtualFile));
         GrammarIssuesCollectorToolListener listener = new GrammarIssuesCollectorToolListener();
 
         String languageArg = findLanguageArg(args);
@@ -55,7 +63,9 @@ public class GrammarIssuesCollector {
         if (!args.contains("-lib")) {
             // getContainingDirectory() must be identified as a read operation on file system
             ApplicationManager.getApplication().runReadAction(() -> {
-                antlr.libDirectory = file.getContainingDirectory().toString();
+                if (file.getContainingDirectory() != null) {
+                    antlr.libDirectory = file.getContainingDirectory().toString();
+                }
             });
         }
 

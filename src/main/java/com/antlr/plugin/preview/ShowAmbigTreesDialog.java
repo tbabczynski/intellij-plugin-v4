@@ -15,7 +15,6 @@ import com.intellij.util.ui.UIUtil;
 import com.antlr.plugin.Utils;
 import com.antlr.plugin.parsing.ParsingUtils;
 import com.antlr.plugin.parsing.PreviewInterpreterRuleContext;
-import org.antlr.v4.gui.TreeViewer;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.atn.AmbiguityInfo;
 import org.antlr.v4.runtime.atn.LookaheadEventInfo;
@@ -42,7 +41,7 @@ public class ShowAmbigTreesDialog extends JDialog {
     private JScrollPane treeScrollPane;
     private JSlider treeSizeSlider;
     private JLabel ambigPhraseLabel;
-    private TreeViewer[] treeViewers;
+    private ParseTreeGraphView[] treeViewers;
 
     public ShowAmbigTreesDialog() {
         setContentPane(contentPane);
@@ -158,7 +157,7 @@ public class ShowAmbigTreesDialog extends JDialog {
 
     public void setScale(double scale) {
         if (treeViewers == null) return;
-        for (TreeViewer viewer : treeViewers) {
+        for (ParseTreeGraphView viewer : treeViewers) {
             viewer.setScale(scale);
         }
         treeScrollPane.revalidate();
@@ -172,7 +171,7 @@ public class ShowAmbigTreesDialog extends JDialog {
         if (ambiguousParseTrees != null) {
             int numTrees = ambiguousParseTrees.size();
             setTitle(title);
-            treeViewers = new TreeViewer[numTrees];
+            treeViewers = new ParseTreeGraphView[numTrees];
             JBPanel panelOfTrees = new JBPanel();
             PreviewInterpreterRuleContext chosenTree =
                     (PreviewInterpreterRuleContext) ambiguousParseTrees.get(highlightTreeIndex);
@@ -182,7 +181,7 @@ public class ShowAmbigTreesDialog extends JDialog {
                     panelOfTrees.add(new JSeparator(JSeparator.VERTICAL));
                 }
                 PreviewInterpreterRuleContext ctx = (PreviewInterpreterRuleContext) ambiguousParseTrees.get(i);
-                treeViewers[i] = new TrackpadZoomingTreeView(null, null, highlightDiffs); // && ctx != chosenTree);
+                treeViewers[i] = new ParseTreeGraphView(null, null, highlightDiffs);
                 AltLabelTextProvider treeText =
                         new AltLabelTextProvider(previewState.parsingResult.parser, previewState.g);
                 treeViewers[i].setTreeTextProvider(treeText);

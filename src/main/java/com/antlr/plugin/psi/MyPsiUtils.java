@@ -71,6 +71,9 @@ public class MyPsiUtils {
      * the grammar. This means we have to walk the whole grammar to find matching candidates.
      */
     public static PsiElement findSpecNode(GrammarSpecNode grammar, final String ruleName) {
+        if (grammar == null || ruleName == null) {
+            return null;
+        }
         PsiElementFilter definitionFilter = element1 -> {
             if (!(element1 instanceof RuleSpecNode)) {
                 return false;
@@ -183,10 +186,25 @@ public class MyPsiUtils {
             if (tokenVocab.length > 0) {
                 PsiElement optionNode = tokenVocab[0].getParent();// tokenVocab[0] is id node
                 PsiElement[] ids = collectChildrenOfType(optionNode, ANTLRv4TokenTypes.RULE_ELEMENT_TYPES.get(ANTLRv4Parser.RULE_optionValue));
-                vocabName = ids[0].getText();
+                if (ids.length > 0) {
+                    // Strip quotes for tokenVocab='LexerName' form
+                    vocabName = stripQuotes(ids[0].getText());
+                }
             }
         }
         return vocabName;
+    }
+
+    public static String stripQuotes(String text) {
+        if (text == null || text.length() < 2) {
+            return text;
+        }
+        char first = text.charAt(0);
+        char last = text.charAt(text.length() - 1);
+        if ((first == '\'' && last == '\'') || (first == '"' && last == '"')) {
+            return text.substring(1, text.length() - 1);
+        }
+        return text;
     }
 
 }

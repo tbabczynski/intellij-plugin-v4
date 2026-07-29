@@ -30,18 +30,30 @@ public class ANTLRv4IndexPatternBuilder implements IndexPatternBuilder {
     @Override
     public TokenSet getCommentTokenSet(@NotNull PsiFile file) {
         if (file instanceof ANTLRv4FileRoot) {
-            return TokenSet.create(getTokenElementType(ANTLRv4Lexer.LINE_COMMENT));
+            return TokenSet.create(
+                    getTokenElementType(ANTLRv4Lexer.LINE_COMMENT),
+                    getTokenElementType(ANTLRv4Lexer.BLOCK_COMMENT)
+            );
         }
         return null;
     }
 
     @Override
     public int getCommentStartDelta(IElementType tokenType) {
-        return tokenType == getTokenElementType(ANTLRv4Lexer.LINE_COMMENT) ? 2 : 0;
+        if (tokenType == getTokenElementType(ANTLRv4Lexer.LINE_COMMENT)) {
+            return 2;
+        }
+        if (tokenType == getTokenElementType(ANTLRv4Lexer.BLOCK_COMMENT)) {
+            return 2;
+        }
+        return 0;
     }
 
     @Override
     public int getCommentEndDelta(IElementType tokenType) {
+        if (tokenType == getTokenElementType(ANTLRv4Lexer.BLOCK_COMMENT)) {
+            return 2;
+        }
         return 0;
     }
 }

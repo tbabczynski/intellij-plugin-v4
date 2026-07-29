@@ -131,7 +131,9 @@ public class ANTLRv4GrammarProperties implements Cloneable {
     }
 
     public String resolveOutputDirName(Project project, VirtualFile contentRoot, String package_) {
-        String outputDirName = outputDir.isEmpty() ? RunANTLROnGrammarFile.OUTPUT_DIR_NAME : outputDir;
+        String outputDirName = (outputDir == null || outputDir.isEmpty())
+                ? RunANTLROnGrammarFile.OUTPUT_DIR_NAME
+                : outputDir;
 
         outputDirName = PathMacroManager.getInstance(project).expandPath(outputDirName);
 

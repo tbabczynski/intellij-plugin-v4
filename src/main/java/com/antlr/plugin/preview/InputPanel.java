@@ -111,17 +111,18 @@ public class InputPanel {
                         // to avoid compile error on super.onFileCho[o]sen
                         TextComponentAccessor.TEXT_FIELD_WHOLE_TEXT.setText(fileChooser.getChildComponent(),
                                 chosenFileToResultingText(chosenFile));
+                        fileRadioButton.setSelected(true);
                         InputPanel.this.onFileChosen(chosenFile);
                     }
                 };
         fileChooser.getTextField().addActionListener(e -> {
+            fileRadioButton.setSelected(true);
             VirtualFile chosenFile = VirtualFileManager.getInstance()
                     .getFileSystem("file")
                     .findFileByPath(fileChooser.getText());
             onFileChosen(chosenFile);
         });
         fileChooser.addActionListener(browseActionListener);
-        fileChooser.getButton().addActionListener(e -> fileRadioButton.setSelected(true));
         fileChooser.setTextFieldPreferredWidth(40);
 
         inputRadioButton.addActionListener(e -> selectInputEvent());
@@ -155,19 +156,24 @@ public class InputPanel {
         }
     }
 
+    private static final Key<DocumentListener> PARSE_DOC_LISTENER_KEY =
+            Key.create("antlr.preview.parse.doc.listener");
+    private static final Key<DocumentListener> MANUAL_INPUT_DOC_LISTENER_KEY =
+            Key.create("antlr.preview.manual.doc.listener");
+
     public void createManualInputPreviewEditor(final PreviewState previewState) {
         final EditorFactory factory = EditorFactory.getInstance();
         Document doc = factory.createDocument("");
-        doc.addDocumentListener(
-                new DocumentListener() {
-                    @Override
-                    public void documentChanged(DocumentEvent e) {
-                        previewState.manualInputText = e.getDocument().getCharsSequence();
-                    }
-                }
-        );
+        DocumentListener manualListener = new DocumentListener() {
+            @Override
+            public void documentChanged(DocumentEvent e) {
+                previewState.manualInputText = e.getDocument().getCharsSequence();
+            }
+        };
+        doc.addDocumentListener(manualListener);
 
         Editor editor = createPreviewEditor(previewState.grammarFile, doc, false);
+        editor.putUserData(MANUAL_INPUT_DOC_LISTENER_KEY, manualListener);
         setEditorComponent(editor.getComponent()); // do before setting state
         previewState.setInputEditor(editor);
 
@@ -195,16 +201,18 @@ public class InputPanel {
             return;
         }
 
-        // get state for grammar in current editor, not editor where user is typing preview input!
-        ANTLRv4PluginController controller = ANTLRv4PluginController.getInstance(previewPanel.project);
-
-        // wipe old and make new one
-        releaseEditor(previewState);
-
-        VirtualFile currentGrammarFile = controller != null ? controller.getCurrentGrammarFile() : null;
+        // Prefer grammar bound to this preview state; fall back to current editor grammar
+        VirtualFile currentGrammarFile = previewState.grammarFile;
+        if (currentGrammarFile == null) {
+            ANTLRv4PluginController controller = ANTLRv4PluginController.getInstance(previewPanel.project);
+            currentGrammarFile = controller != null ? controller.getCurrentGrammarFile() : null;
+        }
         if (currentGrammarFile == null) {
             return;
         }
+
+        // wipe old and make new one
+        releaseEditor(previewState);
 
         Editor editor = createPreviewEditor(currentGrammarFile, inputDocument, true);
         setEditorComponent(editor.getComponent()); // do before setting state
@@ -217,17 +225,17 @@ public class InputPanel {
     public Editor createPreviewEditor(final VirtualFile grammarFile, Document doc, boolean readOnly) {
         LOG.info("createEditor: create new editor for " + grammarFile.getPath() + " " + previewPanel.project.getName());
         final EditorFactory factory = EditorFactory.getInstance();
-        doc.addDocumentListener(
-                new DocumentListener() {
-                    @Override
-                    public void documentChanged(@NotNull DocumentEvent event) {
-                        previewPanel.updateParseTreeFromDoc(grammarFile);
-                    }
-                }
-        );
+        DocumentListener parseListener = new DocumentListener() {
+            @Override
+            public void documentChanged(@NotNull DocumentEvent event) {
+                previewPanel.updateParseTreeFromDoc(grammarFile);
+            }
+        };
+        doc.addDocumentListener(parseListener);
         final Editor editor = readOnly
                 ? factory.createViewer(doc, previewPanel.project)
                 : factory.createEditor(doc, previewPanel.project);
+        editor.putUserData(PARSE_DOC_LISTENER_KEY, parseListener);
         // force right margin
         ((EditorMarkupModel) editor.getMarkupModel()).setErrorStripeVisible(true);
         EditorSettings settings = editor.getSettings();
@@ -300,13 +308,32 @@ public class InputPanel {
     }
 
     public void releaseEditor(PreviewState previewState) {
-//        uninstallListeners(previewState.getInputEditor());
+        Editor editor = previewState.getInputEditor();
+        uninstallListeners(editor);
+        removeDocumentListeners(editor);
 
         // release the editor
         previewState.releaseEditor();
 
         // restore the GUI
         setEditorComponent(placeHolder);
+    }
+
+    private static void removeDocumentListeners(Editor editor) {
+        if (editor == null || editor.isDisposed()) {
+            return;
+        }
+        Document doc = editor.getDocument();
+        DocumentListener parseListener = editor.getUserData(PARSE_DOC_LISTENER_KEY);
+        if (parseListener != null) {
+            doc.removeDocumentListener(parseListener);
+            editor.putUserData(PARSE_DOC_LISTENER_KEY, null);
+        }
+        DocumentListener manualListener = editor.getUserData(MANUAL_INPUT_DOC_LISTENER_KEY);
+        if (manualListener != null) {
+            doc.removeDocumentListener(manualListener);
+            editor.putUserData(MANUAL_INPUT_DOC_LISTENER_KEY, null);
+        }
     }
 
     public void installListeners(Editor editor) {
@@ -322,13 +349,11 @@ public class InputPanel {
     }
 
     public void uninstallListeners(Editor editor) {
-        if (editor == null) return;
-        if (!editor.isDisposed()) {
-            editor.removeEditorMouseListener(editorMouseListener);
+        if (editor == null || editor.isDisposed()) {
+            return;
         }
-        if (!editor.isDisposed()) {
-            editor.removeEditorMouseMotionListener(editorMouseListener);
-        }
+        editor.removeEditorMouseListener(editorMouseListener);
+        editor.removeEditorMouseMotionListener(editorMouseListener);
         for (CaretListener listener : caretListeners) {
             editor.getCaretModel().removeCaretListener(listener);
         }
@@ -707,7 +732,8 @@ public class InputPanel {
         // the user has started altering the input after the parse was kicked off; another parse
         // will follow up and change the error messages and location of annotations in this input panel.
         // Avoid trying to select text outside of doc[0..stopindex] as a general rule too.
-        if (a >= 0 && b + 1 <= editor.getDocument().getTextLength()) {
+        // b is already exclusive end (stopIndex + 1)
+        if (a >= 0 && b <= editor.getDocument().getTextLength()) {
             final TextAttributes attr = new TextAttributes();
             attr.setForegroundColor(JBColor.RED);
             attr.setEffectColor(JBColor.RED);

@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+
+##[2026.2.0]
+### Changed
+- Replace ANTLR `TreeViewer` / vendored Batik with custom Swing `ParseTreeGraphView` for Parse tree preview (PNG + lightweight SVG export)
+- Clicking a Parse tree node highlights the matching span in the preview input (same as Hierarchy)
+
+### Fixed
+- Fix listener lifecycle leaks (MessageBus / project close / multi-project VFS filtering)
+- Fix external annotator severity fall-through and reduce EDT/read-lock pressure
+- Fix bare `-o`/`-lib` ANTLR CLI args and restore autogen-on-save for parser grammars
+- Fix preview refresh race, overlapping parse cancellation, and file-close cleanup
+- Fix completion/resolve/rename for modes, quoted tokenVocab, and parser rule rename
+- Align live template contexts (`ANTLR_OUTSIDE-Tool`) with `user.xml`; keep `-Tool` suffix to avoid plugin clashes
+- Fix `@header` package detection regex and autogen staleness path (use grammar dir, not libDir)
+- Fix Test Rule tool-window race; remove BAD_LEXER_GRAMMAR wildcard association
+- Fix Structure View editor autoscroll / null-safe mode children; brace matcher uses LBRACE/RBRACE
+- Fix Inline/Uniquify TOKEN_REF lookup in parser rules; import Alias=Foo navigation
+- Always force Generate Parser action; lexer extract defaults to `NEW_RULE`
+- Align CI Gradle properties with the Kotlin build script; align Gradle wrapper version
+- Move tests to `com.antlr.plugin` package
+
 ## [2025.2.2]
 ### Fixed
 - [Fix some bugs](https://github.com/mbtsp/intellij-plugin-v4/milestone/13?closed=1)

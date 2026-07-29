@@ -12,11 +12,13 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.IntroduceTargetChooser;
 import com.antlr.plugin.ANTLRv4TokenTypes;
 import com.antlr.plugin.parsing.ParsingResult;
 import com.antlr.plugin.parsing.ParsingUtils;
 import com.antlr.plugin.psi.LexerRuleRefNode;
+import com.antlr.plugin.psi.LexerRuleSpecNode;
 import com.antlr.plugin.psi.ParserRuleRefNode;
 import com.antlr.plugin.refactor.RefactorUtils;
 import org.antlr.v4.runtime.Parser;
@@ -132,6 +134,9 @@ public class ExtractRuleAction extends AnAction {
         Document doc = editor.getDocument();
         String grammarText = psiFile.getText();
         ParsingResult results = ParsingUtils.parseANTLRGrammar(grammarText);
+        if (results == null || results.tree == null || results.parser == null) {
+            return;
+        }
         final Parser parser = results.parser;
         final ParserRuleContext tree = (ParserRuleContext) results.tree;
         TokenStream tokens = parser.getTokenStream();
@@ -154,14 +159,21 @@ public class ExtractRuleAction extends AnAction {
 
         selectionModel.setSelection(start.getStartIndex(), stop.getStopIndex() + 1);
         final Project project = psiFile.getProject();
-        final ChooseExtractedRuleName nameChooser = new ChooseExtractedRuleName(project);
+        // Lexer rules must start with uppercase; parser rules with lowercase
+        PsiElement atStart = psiFile.findElementAt(selectionModel.getSelectionStart());
+        boolean isLexer = atStart != null && PsiTreeUtil.getParentOfType(atStart, LexerRuleSpecNode.class) != null;
+        String defaultName = isLexer ? "NEW_RULE" : "newRule";
+        final ChooseExtractedRuleName nameChooser = new ChooseExtractedRuleName(project, defaultName);
         nameChooser.show();
-        if (nameChooser.ruleName == null) return;
+        if (nameChooser.ruleName == null || nameChooser.ruleName.isBlank()) return;
 
         // make new rule string
         final String ruleText = selectionModel.getSelectedText();
 
         final int insertionPoint = RefactorUtils.getCharIndexOfNextRuleStart(tree, start.getTokenIndex());
+        if (insertionPoint < 0) {
+            return;
+        }
         final String newRule = "\n" + nameChooser.ruleName + " : " + ruleText + " ;" + "\n";
 
         runWriteCommandAction(project, () -> {

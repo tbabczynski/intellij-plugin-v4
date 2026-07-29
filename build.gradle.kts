@@ -21,8 +21,13 @@ group = providers.gradleProperty("pluginGroup").get()
 version = providers.gradleProperty("pluginVersion").get()
 
 repositories {
-    mavenLocal()
     mavenCentral()
+    // Prefer public repos; mavenLocal only for local SNAPSHOT deps (antlr4-intellij-adaptor, report-issue)
+    mavenLocal()
+    // Also resolve from the user-home .m2 in case maven.repo.local is overridden
+    maven {
+        url = uri("${System.getProperty("user.home")}/.m2/repository")
+    }
     // IntelliJ Platform Gradle Plugin Repositories Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-repositories-extension.html
     intellijPlatform {
         defaultRepositories()
@@ -33,7 +38,7 @@ java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
 }
-// Set the JVM language level used to build the project. Use Java 11 for 2020.3+, and Java 17 for 2022.2+.
+// Java 17 is required for IntelliJ Platform 2022.2+
 kotlin {
     jvmToolchain(17)
 }

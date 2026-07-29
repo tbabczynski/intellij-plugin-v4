@@ -6,8 +6,8 @@
 
     <description><![CDATA[
   <p>
-      This plugin is for ANTLR v4 grammars and includes ANTLR 4.13.1. It works with
-      2020.3 and above.  It should work in other JetBrains IDEs.
+      This plugin is for ANTLR v4 grammars and includes ANTLR 4.13.2. It works with
+      IntelliJ IDEA 2022.2 and above. It should work in other JetBrains IDEs.
      </p>
 
      <ul>
@@ -139,7 +139,7 @@ For really big files and slow grammars, there is an appreciable delay when displ
                 language="ANTLRv4-Tool" id="antlr.new.antlrHighlighterFactory"/>
         <lang.commenter id="antlr.new.lang.commenter" language="ANTLRv4-Tool" implementationClass="com.antlr.plugin.ANTLRv4Commenter"/>
         <indexPatternBuilder id="antlr.new.index.pattern.builder" implementation="com.antlr.plugin.psi.ANTLRv4IndexPatternBuilder"/>
-        <lang.braceMatcher id="antlr.new.lang,brace.matcher" language="ANTLRv4-Tool"
+        <lang.braceMatcher id="antlr.new.lang.brace.matcher" language="ANTLRv4-Tool"
                            implementationClass="com.antlr.plugin.editor.ANTLRv4BraceMatcher"/>
         <colorSettingsPage id="antlr.new.color.setting.page" implementation="com.antlr.plugin.configdialogs.ANTLRv4ColorsPage"/>
         <additionalTextAttributes scheme="Default" file="colorSchemes/ANTLRv4Default.xml"/>
@@ -154,11 +154,11 @@ For really big files and slow grammars, there is an appreciable delay when displ
         <iconProvider id="antlr.new.icon.provider"  implementation="com.antlr.plugin.ANTLRv4IconProvider"/>
 
         <externalAnnotator  id="antlr.new.external.annotator" language="ANTLRv4-Tool" implementationClass="com.antlr.plugin.ANTLRv4ExternalAnnotator"/>
-        <lang.findUsagesProvider id="antlr.new.lang.find.useges.provider" language="ANTLRv4-Tool"
+        <lang.findUsagesProvider id="antlr.new.lang.find.usages.provider" language="ANTLRv4-Tool"
                                  implementationClass="com.antlr.plugin.ANTLRv4FindUsagesProvider"/>
 
         <defaultLiveTemplates file="/liveTemplates/lexer/user.xml"/>
-        <liveTemplateContext id="antlr.new.live.template.antlr.gerner.context" implementation="com.antlr.plugin.templates.ANTLRGenericContext"
+        <liveTemplateContext id="antlr.new.live.template.antlr.generic.context" implementation="com.antlr.plugin.templates.ANTLRGenericContext"
                              contextId="ANTLR-Tool"/>
         <liveTemplateContext id="antlr.new.live.template.outside.rule.context" implementation="com.antlr.plugin.templates.OutsideRuleContext"
                              contextId="ANTLR_OUTSIDE-Tool"/>
@@ -166,7 +166,7 @@ For really big files and slow grammars, there is an appreciable delay when displ
                              id="antlr.new.intellij.plugin.configdialogs.ANTLRv4ProjectSettings"
                              displayName="ANTLR V4 Default Project Settings"
                              instance="com.antlr.plugin.configdialogs.ANTLRv4ProjectSettings"/>
-        <projectService id="antlr.new.antlr.grammar.propertioes.component"
+        <projectService id="antlr.new.antlr.grammar.properties.component"
                 serviceImplementation="com.antlr.plugin.configdialogs.ANTLRv4ToolGrammarPropertiesComponent"/>
         <lang.refactoringSupport  id="antlr.new.refactoring.support" language="ANTLRv4-Tool"
                                  implementationClass="com.antlr.plugin.refactor.ANTLRv4RefactoringSupport"/>

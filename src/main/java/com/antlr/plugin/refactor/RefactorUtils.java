@@ -35,7 +35,6 @@ public class RefactorUtils {
         put("'?'", "QUESTION");
         put("':'", "COLON");
         put("'=='", "EQUAL_EQUAL");
-        put("'='", "EQUAL");
         put("'<='", "LE");
         put("'>='", "GE");
         put("'!='", "NOT_EQUAL");
@@ -76,7 +75,8 @@ public class RefactorUtils {
         }
         // is it a keyword like true or begin?
         String strippedLiteral = Misc.strip(literal, 1);
-        if (Character.isLetter(strippedLiteral.charAt(0))) {
+        if (strippedLiteral != null && !strippedLiteral.isEmpty()
+                && Character.isLetter(strippedLiteral.charAt(0))) {
             return strippedLiteral.toUpperCase();
         }
         return "T__" + lexerRuleNameID++;
@@ -187,12 +187,21 @@ public class RefactorUtils {
     public static List<TerminalNode> getAllRuleRefNodes(Parser parser, ParseTree tree, String ruleName) {
         List<TerminalNode> nodes = new ArrayList<>();
         Collection<ParseTree> ruleRefs;
+        Collection<ParseTree> defs;
         if (Grammar.isTokenName(ruleName)) {
-            ruleRefs = XPath.findAll(tree, "//lexerRuleBlock//TOKEN_REF", parser);
+            // Include TOKEN_REF in parser rules (e.g. expr : INT;) as well as lexer blocks,
+            // but exclude the lexer rule definition name itself.
+            ruleRefs = XPath.findAll(tree, "//TOKEN_REF", parser);
+            defs = XPath.findAll(tree, "//lexerRule/TOKEN_REF", parser);
         } else {
-            ruleRefs = XPath.findAll(tree, "//ruleBlock//RULE_REF", parser);
+            ruleRefs = XPath.findAll(tree, "//RULE_REF", parser);
+            defs = XPath.findAll(tree, "//parserRuleSpec/RULE_REF", parser);
         }
+        HashSet<ParseTree> defSet = new HashSet<>(defs);
         for (ParseTree node : ruleRefs) {
+            if (defSet.contains(node)) {
+                continue; // skip rule definition name
+            }
             TerminalNode terminal = (TerminalNode) node;
             Token rrefToken = terminal.getSymbol();
             String r = rrefToken.getText();
@@ -210,8 +219,14 @@ public class RefactorUtils {
     public static int getCharIndexOfNextRuleStart(ParserRuleContext tree, int tokenIndex) {
         final ParserRuleContext selNode =
                 Trees.getRootOfSubtreeEnclosingRegion(tree, tokenIndex, tokenIndex);
+        if (selNode == null) {
+            return -1;
+        }
         final ParserRuleContext ruleRoot = (ParserRuleContext)
                 getAncestorWithType(selNode, ANTLRv4Parser.RuleSpecContext.class);
+        if (ruleRoot == null || ruleRoot.getStop() == null) {
+            return -1;
+        }
 
         return ruleRoot.getStop().getStopIndex() + 2; // insert after '\n' following ';'
     }

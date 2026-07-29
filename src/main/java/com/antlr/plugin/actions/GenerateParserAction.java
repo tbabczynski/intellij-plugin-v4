@@ -1,6 +1,5 @@
 package com.antlr.plugin.actions;
 
-import com.antlr.plugin.configdialogs.ANTLRv4ToolGrammarPropertiesStore;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationType;
 import com.intellij.notification.Notifications;
@@ -61,36 +60,35 @@ public class GenerateParserAction extends AnAction implements DumbAware {
 
         boolean unsaved = !psiMgr.isCommitted(doc) || docMgr.isDocumentUnsaved(doc);
         if (unsaved) {
-            // save event triggers ANTLR run if autogen on
             psiMgr.commitDocument(doc);
             docMgr.saveDocument(doc);
         }
-        boolean forceGeneration = true; // from action, they really mean it
+        // Explicit Generate always forces a run (do not rely on autogen/save side-effects)
         RunANTLROnGrammarFile gen =
                 new RunANTLROnGrammarFile(grammarFile,
                         project,
                         title,
                         canBeCancelled,
-                        forceGeneration);
+                        true);
 
-        boolean autogen = ANTLRv4ToolGrammarPropertiesStore.getGrammarProperties(project, grammarFile).shouldAutoGenerateParser();
-        if (!unsaved || !autogen) {
-            // if everything already saved (not stale) then run ANTLR
-            // if had to be saved and autogen NOT on, then run ANTLR
-            // Otherwise, the save file event will have or will run ANTLR.
-            ProgressManager.getInstance().run(gen); //, "Generating", canBeCancelled, e.getData(PlatformDataKeys.PROJECT));
+        ProgressManager.getInstance().run(gen);
 
-            // refresh from disk to see new files
-            Set<File> generatedFiles = new HashSet<>();
-            generatedFiles.add(new File(gen.getOutputDirName()));
-            LocalFileSystem.getInstance().refreshIoFiles(generatedFiles, true, true, null);
-            // pop up a notification
-            Notification notification =
-                    new Notification(RunANTLROnGrammarFile.groupDisplayId,
-                            "parser for " + grammarFile.getName() + " generated",
-                            "to " + gen.getOutputDirName(),
-                            NotificationType.INFORMATION);
-            Notifications.Bus.notify(notification, project);
+        // refresh from disk to see new files
+        Set<File> generatedFiles = new HashSet<>();
+        generatedFiles.add(new File(gen.getOutputDirName()));
+        LocalFileSystem.getInstance().refreshIoFiles(generatedFiles, true, true, null);
+        Notification notification;
+        if (gen.hadErrors()) {
+            notification = new Notification(RunANTLROnGrammarFile.groupDisplayId,
+                    "Failed to generate parser for " + grammarFile.getName(),
+                    "See ANTLR Tool Console for details",
+                    NotificationType.ERROR);
+        } else {
+            notification = new Notification(RunANTLROnGrammarFile.groupDisplayId,
+                    "parser for " + grammarFile.getName() + " generated",
+                    "to " + gen.getOutputDirName(),
+                    NotificationType.INFORMATION);
         }
+        Notifications.Bus.notify(notification, project);
     }
 }

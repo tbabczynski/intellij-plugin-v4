@@ -67,10 +67,9 @@ public class ANTLRv4StructureViewElement implements StructureViewTreeElement {
                     }
 
                     if (element instanceof LexerRuleSpecNode || element instanceof ParserRuleSpecNode) {
-                        PsiElement rule = PsiTreeUtil.findChildOfAnyType(element, LexerRuleRefNode.class, ParserRuleRefNode.class);
-                        if (rule != null) {
-                            treeElements.add(new ANTLRv4StructureViewElement(rule));
-                        }
+                        // Use SpecNode so leaf/suitable-class/autoscroll stay consistent
+                        treeElements.add(new ANTLRv4StructureViewElement(element));
+                        return;
                     }
 
                     super.visitElement(element);
@@ -81,7 +80,10 @@ public class ANTLRv4StructureViewElement implements StructureViewTreeElement {
 
             if (lexerRules != null) {
                 for (LexerRuleSpecNode lexerRule : lexerRules) {
-                    treeElements.add(new ANTLRv4StructureViewElement(PsiTreeUtil.findChildOfType(lexerRule, LexerRuleRefNode.class)));
+                    LexerRuleRefNode ref = PsiTreeUtil.findChildOfType(lexerRule, LexerRuleRefNode.class);
+                    if (ref != null) {
+                        treeElements.add(new ANTLRv4StructureViewElement(lexerRule));
+                    }
                 }
             }
         }
@@ -89,7 +91,6 @@ public class ANTLRv4StructureViewElement implements StructureViewTreeElement {
         return treeElements.toArray(new TreeElement[0]);
     }
 
-    // probably not critical
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

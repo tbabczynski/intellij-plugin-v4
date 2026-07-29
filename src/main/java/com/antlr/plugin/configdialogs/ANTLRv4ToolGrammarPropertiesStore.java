@@ -123,7 +123,7 @@ public class ANTLRv4ToolGrammarPropertiesStore {
         ANTLRv4GrammarProperties defaultSettings = new ANTLRv4GrammarProperties();
 
         defaultSettings.fileName = "**";
-        defaultSettings.autoGen = true;
+        defaultSettings.autoGen = false;
         defaultSettings.outputDir = "";
         defaultSettings.libDir = "";
         defaultSettings.encoding = "";

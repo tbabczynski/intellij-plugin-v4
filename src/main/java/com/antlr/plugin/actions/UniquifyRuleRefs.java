@@ -54,6 +54,9 @@ public class UniquifyRuleRefs extends AnAction {
 
         String grammarText = psiFile.getText();
         ParsingResult results = ParsingUtils.parseANTLRGrammar(grammarText);
+        if (results == null || results.tree == null || results.parser == null) {
+            return;
+        }
         Parser parser = results.parser;
         ParseTree tree = results.tree;
 
@@ -114,9 +117,12 @@ public class UniquifyRuleRefs extends AnAction {
             javadoc = start.getText() + "\n";
         }
 
+        // Capture body before deleting; token stream / offsets are invalid after the edit
+        final String ruleText = RefactorUtils.getRuleText(tokens, ruleDefNode);
+
         // delete original rule
         List<Token> hiddenTokensToRight = tokens.getHiddenTokensToRight(stop.getTokenIndex());
-        if (hiddenTokensToRight != null && hiddenTokensToRight.size() > 0) {
+        if (hiddenTokensToRight != null && !hiddenTokensToRight.isEmpty()) {
             // remove extra whitespace but not trailing comments (if any)
             // javadoc is included in start (if any) as it's not hidden
             Token afterSemi = hiddenTokensToRight.get(0);
@@ -127,7 +133,6 @@ public class UniquifyRuleRefs extends AnAction {
         doc.deleteString(start.getStartIndex(), stop.getStopIndex() + 1);
 
         // now insert nrefs copies of ruleText at insertionPoint
-        final String ruleText = RefactorUtils.getRuleText(tokens, ruleDefNode);
         for (i = nrefs; i >= 1; i--) {
             String uniqueRuleName = ruleName + i;
             final String newRule = javadoc + uniqueRuleName + " : " + ruleText + " ;" + "\n\n";

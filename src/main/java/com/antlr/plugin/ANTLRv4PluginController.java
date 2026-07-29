@@ -1,6 +1,7 @@
 package com.antlr.plugin;
 
 import com.antlr.ApplicationInfo;
+import com.antlr.plugin.parsing.ParsingResult;
 import com.antlr.plugin.parsing.ParsingUtils;
 import com.antlr.plugin.parsing.RunANTLROnGrammarFile;
 import com.antlr.plugin.preview.PreviewState;
@@ -25,6 +26,10 @@ import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.progress.util.BackgroundTaskUtil;
 import com.intellij.openapi.progress.util.ProgressWindow;
 import com.intellij.openapi.project.Project;
+import com.antlr.plugin.configdialogs.ANTLRv4GrammarProperties;
+import com.antlr.plugin.configdialogs.ANTLRv4ToolGrammarPropertiesStore;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfo;
@@ -41,12 +46,17 @@ import org.antlr.v4.parse.ANTLRParser;
 import org.antlr.v4.tool.Grammar;
 import org.antlr.v4.tool.LexerGrammar;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -62,7 +72,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * needed for the preview window. Updates must be made atomically so that
  * the grammars and editors are consistently associated with the same window.
  */
-public class ANTLRv4PluginController {
+public class ANTLRv4PluginController implements Disposable {
     public static final String PLUGIN_ID = ApplicationInfo.PLUGIN_ID;
 
     public static final Key<GrammarEditorMouseAdapter> EDITOR_MOUSE_LISTENER_KEY = Key.create("EDITOR_MOUSE_LISTENER_KEY");
@@ -73,14 +83,17 @@ public class ANTLRv4PluginController {
 
     public Project project;
 
-    public Map<String, PreviewState> grammarToPreviewState = new ConcurrentHashMap<>();
+    public final Map<String, PreviewState> grammarToPreviewState = new ConcurrentHashMap<>();
 
     public MyVirtualFileAdapter myVirtualFileAdapter = new MyVirtualFileAdapter();
     public MyFileEditorManagerAdapter myFileEditorManagerAdapter = new MyFileEditorManagerAdapter();
 
     private ProgressIndicator parsingProgressIndicator;
+    private MessageBusConnection messageBusConnection;
+    private final AtomicBoolean listenersInstalled = new AtomicBoolean(false);
+    private final AtomicLong parseGeneration = new AtomicLong();
 
-    private final Map<String, Long> grammarFileMods = new HashMap<>();
+    private final Map<String, Long> grammarFileMods = new ConcurrentHashMap<>();
 
     public ANTLRv4PluginController(Project project) {
         this.project = project;
@@ -123,54 +136,55 @@ public class ANTLRv4PluginController {
 
 
     public void projectClosed() {
-        LOG.info("projectClosed " + project.getName());
-        //synchronized ( shutdownLock ) { // They should be called from EDT only so no lock
-        projectIsClosed = true;
-        uninstallListeners();
-        if (grammarToPreviewState != null) {
-            for (Map.Entry<String, PreviewState> entry : grammarToPreviewState.entrySet()) {
-                if (this.project != null && !this.project.isDisposed()) {
-                    this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).releaseEditor(entry.getValue());
-                }
-            }
-
-        }
-        // We can't dispose of the preview state map during unit tests
-        if (ApplicationManager.getApplication().isUnitTestMode()) return;
-        grammarToPreviewState = null;
+        dispose();
     }
 
-    // seems that intellij can kill and reload a project w/o user knowing.
-    // a ptr was left around that pointed at a disposed project. led to
-    // problem in switchGrammar. Probably was a listener still attached and trigger
-    // editor listeners released in editorReleased() events.
+    @Override
+    public void dispose() {
+        if (projectIsClosed) {
+            return;
+        }
+        LOG.info("dispose " + project.getName());
+        projectIsClosed = true;
+        abortCurrentParsing();
+        uninstallListeners();
+        for (PreviewState previewState : grammarToPreviewState.values()) {
+            previewState.releaseEditor();
+            if (!project.isDisposed()) {
+                project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).releaseEditor(previewState);
+            }
+        }
+        grammarToPreviewState.clear();
+        grammarFileMods.clear();
+    }
+
     public void uninstallListeners() {
+        if (!listenersInstalled.compareAndSet(true, false)) {
+            return;
+        }
         VirtualFileManager.getInstance().removeVirtualFileListener(myVirtualFileAdapter);
-        if (!project.isDisposed()) {
-            MessageBusConnection msgBus = project.getMessageBus().connect(project);
-            msgBus.disconnect();
+        if (messageBusConnection != null) {
+            messageBusConnection.disconnect();
+            messageBusConnection = null;
         }
     }
 
     // ------------------------------
 
     public void installListeners() {
+        if (projectIsClosed || project.isDisposed() || !listenersInstalled.compareAndSet(false, true)) {
+            return;
+        }
         LOG.info("installListeners " + project.getName());
-        // Listen for .g4 file saves
+        // Listen for .g4 file saves (application-wide; filtered to this project below)
         VirtualFileManager.getInstance().addVirtualFileListener(myVirtualFileAdapter);
 
-        // Listen for editor window changes
-        MessageBusConnection msgBus = project.getMessageBus().connect();
-        msgBus.subscribe(
+        // Listen for editor window changes; parented to this Disposable for auto-cleanup
+        messageBusConnection = project.getMessageBus().connect(this);
+        messageBusConnection.subscribe(
                 FileEditorManagerListener.FILE_EDITOR_MANAGER,
                 myFileEditorManagerAdapter
         );
-//        msgBus.subscribe(FileOpenedSyncListener.TOPIC, new FileOpenedSyncListener() {
-//            @Override
-//            public void fileOpenedSync(@NotNull FileEditorManager source, @NotNull VirtualFile file, @NotNull List<FileEditorWithProvider> editorsWithProviders) {
-//                currentEditorFileChangedEvent(project, null, file, false);
-//            }
-//        });
 
         EditorFactory factory = EditorFactory.getInstance();
         factory.addEditorFactoryListener(
@@ -178,6 +192,10 @@ public class ANTLRv4PluginController {
                     @Override
                     public void editorCreated(@NotNull EditorFactoryEvent event) {
                         final Editor editor = event.getEditor();
+                        // Require a matching project; null-project editors are not ours
+                        if (editor.getProject() != project) {
+                            return;
+                        }
                         final Document doc = editor.getDocument();
                         VirtualFile file = FileDocumentManager.getInstance().getFile(doc);
                         if (file != null && file.getName().endsWith(".g4")) {
@@ -190,7 +208,7 @@ public class ANTLRv4PluginController {
                     @Override
                     public void editorReleased(@NotNull EditorFactoryEvent event) {
                         Editor editor = event.getEditor();
-                        if (editor.getProject() != null && editor.getProject() != project) {
+                        if (editor.getProject() != project) {
                             return;
                         }
                         GrammarEditorMouseAdapter listener = editor.getUserData(EDITOR_MOUSE_LISTENER_KEY);
@@ -200,7 +218,7 @@ public class ANTLRv4PluginController {
                         }
                     }
                 }
-                , project.getMessageBus());
+                , this);
     }
 
     /**
@@ -222,6 +240,9 @@ public class ANTLRv4PluginController {
     }
 
     public void grammarFileSavedEvent(Project project, VirtualFile grammarFile) {
+        if (projectIsClosed || project.isDisposed()) {
+            return;
+        }
 
         Long modCount = grammarFile.getModificationCount();
         String grammarFilePath = grammarFile.getPath();
@@ -233,13 +254,30 @@ public class ANTLRv4PluginController {
         grammarFileMods.put(grammarFilePath, modCount);
 
         LOG.info("grammarFileSavedEvent " + grammarFilePath + " " + project.getName());
-        updateGrammarObjectsFromFile(project, grammarFile, true); // force reload
-        if (this.project != null && !this.project.isDisposed()) {
+        // True disk/save path: may regenerate .tokens / run Autogen when enabled
+        updateGrammarObjectsFromFile(project, grammarFile, true, () -> {
+            if (projectIsClosed || this.project.isDisposed()) {
+                return;
+            }
             this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).grammarFileSaved(grammarFile);
-        } else {
-            LOG.info("grammarFileSavedEvent called before preview panel created");
-        }
+        });
+    }
 
+    /**
+     * Reload interpreter grammars and refresh the preview UI only.
+     * Does not write {@code .tokens} or run ANTLR code generation — used by annotator-driven auto-refresh.
+     */
+    public void reloadGrammarForPreview(VirtualFile grammarFile) {
+        if (projectIsClosed || project.isDisposed() || grammarFile == null) {
+            return;
+        }
+        LOG.info("reloadGrammarForPreview " + grammarFile.getPath() + " " + project.getName());
+        updateGrammarObjectsFromFile(project, grammarFile, false, () -> {
+            if (projectIsClosed || this.project.isDisposed()) {
+                return;
+            }
+            this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).grammarFileSaved(grammarFile);
+        });
     }
 
     public void currentEditorFileChangedEvent(Project project, VirtualFile oldFile, VirtualFile newFile, boolean modified) {
@@ -268,14 +306,18 @@ public class ANTLRv4PluginController {
         // When switching from a lexer grammar, update its objects in case the grammar was modified.
         // The updated objects might be needed later by another dependant grammar.
         if (oldFile != null && "g4".equals(oldFile.getExtension()) && modified) {
-            updateGrammarObjectsFromFile(project, oldFile, true);
+            updateGrammarObjectsFromFile(project, oldFile, true, null);
         }
 
         PreviewState previewState = getPreviewState(newFile);
         if (previewState.g == null && previewState.lg == null) { // only load grammars if none is there
-            updateGrammarObjectsFromFile(project, newFile, false);
-        }
-        if (this.project != null && !this.project.isDisposed()) {
+            updateGrammarObjectsFromFile(project, newFile, false, () -> {
+                if (projectIsClosed || this.project.isDisposed()) {
+                    return;
+                }
+                this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).grammarFileChanged(newFile);
+            });
+        } else if (!this.project.isDisposed()) {
             this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).grammarFileChanged(newFile);
         }
 
@@ -297,20 +339,23 @@ public class ANTLRv4PluginController {
         }
 
         // Dispose of state, editor, and such for this file
-        PreviewState previewState = grammarToPreviewState.get(grammarFileName);
+        PreviewState previewState = grammarToPreviewState.remove(grammarFileName);
+        grammarFileMods.remove(grammarFileName);
         if (previewState == null) { // project closing must have done already
             return;
         }
 
         previewState.g = null; // wack old ref to the Grammar for text in editor
         previewState.lg = null;
-        if (this.project != null && !this.project.isDisposed()) {
-            this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).closeGrammar(vfile);
+        previewState.releaseEditor();
+        if (!project.isDisposed()) {
+            project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).closeGrammar(vfile);
         }
-        grammarToPreviewState.remove(grammarFileName);
 
-        // close tool window
-        hidePreview();
+        // Only hide preview when no other grammar preview state remains
+        if (grammarToPreviewState.isEmpty()) {
+            hidePreview();
+        }
     }
 
     private void hidePreview() {
@@ -346,47 +391,105 @@ public class ANTLRv4PluginController {
      * this grammar or we will have seen a grammar file changed event.
      * (I hope!)
      */
-    private void updateGrammarObjectsFromFile(Project project, VirtualFile grammarFile, boolean generateTokensFile) {
-        if (project.isDisposed()) {
+    private void updateGrammarObjectsFromFile(Project project, VirtualFile grammarFile, boolean generateTokensFile,
+                                              @Nullable Runnable afterReload) {
+        if (project.isDisposed() || projectIsClosed) {
             return;
         }
-        updateGrammarObjectsFromFile_(project, grammarFile);
-
-        // if grammarFileName is a separate lexer, we need to look for
-        // its matching parser, if any, that is loaded in an editor
-        // (don't go looking on disk).
-        PreviewState s = getAssociatedParserIfLexer(grammarFile.getPath());
-        if (s != null) {
-            if (generateTokensFile) {
-                // Run the tool to regenerate the .tokens file, which will be
-                // needed in the parser grammar
-                runANTLRTool(grammarFile);
+        updateGrammarObjectsFromFile_(project, grammarFile, () -> {
+            if (project.isDisposed() || projectIsClosed) {
+                return;
             }
 
-            // try to load lexer again and associate with this parser grammar.
-            // must update parser too as tokens have changed
-            updateGrammarObjectsFromFile_(project, s.grammarFile);
-        }
+            // if grammarFileName is a separate lexer, reload every open parser that depends on it
+            List<PreviewState> associated = getAssociatedParsersIfLexer(grammarFile.getPath());
+            if (!associated.isEmpty()) {
+                Runnable reloadAssociated = () -> {
+                    if (projectIsClosed || project.isDisposed()) {
+                        return;
+                    }
+                    AtomicInteger remaining = new AtomicInteger(associated.size());
+                    Runnable oneDone = () -> {
+                        if (remaining.decrementAndGet() == 0 && afterReload != null) {
+                            ApplicationManager.getApplication().invokeLater(afterReload, project.getDisposed());
+                        }
+                    };
+                    for (PreviewState s : associated) {
+                        if (s.grammarFile != null) {
+                            updateGrammarObjectsFromFile_(project, s.grammarFile, oneDone);
+                        } else if (remaining.decrementAndGet() == 0 && afterReload != null) {
+                            ApplicationManager.getApplication().invokeLater(afterReload, project.getDisposed());
+                        }
+                    }
+                };
+
+                if (generateTokensFile) {
+                    // Write .tokens synchronously, then reload parsers so they see fresh vocab
+                    PreviewState lexerState = getPreviewState(grammarFile);
+                    LexerGrammar lg = lexerState.lg;
+                    if (lg != null && lg != ParsingUtils.BAD_LEXER_GRAMMAR) {
+                        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                            try {
+                                RunANTLROnGrammarFile.writeTokensVocabFile(project, grammarFile, lg);
+                            } catch (Exception ex) {
+                                LOG.warn("Failed to write .tokens file for " + grammarFile.getName(), ex);
+                            }
+                            if (!projectIsClosed && !project.isDisposed()) {
+                                reloadAssociated.run();
+                            }
+                        });
+                        return;
+                    }
+                    // Fallback: full codegen if lexer object is unavailable
+                    runANTLRTool(grammarFile);
+                }
+
+                reloadAssociated.run();
+                return;
+            }
+
+            // Autogen for parser / combined grammars on save
+            if (generateTokensFile) {
+                ANTLRv4GrammarProperties props = ANTLRv4ToolGrammarPropertiesStore.getGrammarProperties(project, grammarFile);
+                if (props != null && props.shouldAutoGenerateParser()) {
+                    runANTLRTool(grammarFile);
+                }
+            }
+
+            if (afterReload != null) {
+                ApplicationManager.getApplication().invokeLater(afterReload, project.getDisposed());
+            }
+        });
     }
 
-    private void updateGrammarObjectsFromFile_(Project project, VirtualFile grammarFile) {
+    private void updateGrammarObjectsFromFile_(Project project, VirtualFile grammarFile, @Nullable Runnable afterReload) {
         Task.Backgroundable task = new Task.Backgroundable(project, "Update grammar object from file") {
             @Override
             public void run(@NotNull ProgressIndicator progressIndicator) {
+                if (projectIsClosed || project.isDisposed()) {
+                    return;
+                }
                 PreviewState previewState = getPreviewState(grammarFile);
                 CountDownLatch countDownLatch = new CountDownLatch(1);
                 AtomicReference<Grammar[]> atomicReference = new AtomicReference<>(null);
                 ApplicationManager.getApplication().executeOnPooledThread(() -> {
                     try {
-                        Grammar[] grammars = ParsingUtils.loadGrammars(grammarFile, project);
-                        atomicReference.set(grammars);
+                        if (!projectIsClosed && !project.isDisposed()) {
+                            Grammar[] grammars = ParsingUtils.loadGrammars(grammarFile, project);
+                            atomicReference.set(grammars);
+                        }
                     } finally {
                         countDownLatch.countDown();
                     }
                 });
                 try {
                     countDownLatch.await(5L, TimeUnit.MINUTES);
-                } catch (InterruptedException ignored) {
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    LOG.warn("Interrupted while loading grammar objects", e);
+                }
+                if (projectIsClosed || project.isDisposed()) {
+                    return;
                 }
                 Grammar[] grammars = atomicReference.get();
                 if (grammars != null) {
@@ -400,35 +503,72 @@ public class ANTLRv4PluginController {
                         previewState.g = null;
                     }
                 }
+                // Invalidate in-flight parses that may have read stale grammar objects
+                parseGeneration.incrementAndGet();
+                if (afterReload != null) {
+                    ApplicationManager.getApplication().invokeLater(afterReload, project.getDisposed());
+                }
             }
         };
         task.queue();
     }
 
-    // TODO there could be multiple grammars importing/tokenVocab'ing this lexer grammar
+    @Nullable
     public PreviewState getAssociatedParserIfLexer(String grammarFileName) {
-        if (grammarToPreviewState != null) {
-            for (Map.Entry<String, PreviewState> entry : grammarToPreviewState.entrySet()) {
-                PreviewState s = entry.getValue();
-                if (s != null && s.lg != null &&
-                        (sameFile(grammarFileName, s.lg.fileName) || s.lg == ParsingUtils.BAD_LEXER_GRAMMAR)) {
-                    // s has a lexer with same filename, see if there is a parser grammar
-                    // (not a combined grammar)
-                    if (s.g != null && s.g.getType() == ANTLRParser.PARSER) {
-                        return s;
-                    }
-                }
+        List<PreviewState> all = getAssociatedParsersIfLexer(grammarFileName);
+        return all.isEmpty() ? null : all.get(0);
+    }
 
-                if (s != null && s.g != null && s.g.importedGrammars != null) {
-                    for (Grammar importedGrammar : s.g.importedGrammars) {
-                        if (grammarFileName.equals(importedGrammar.fileName)) {
-                            return s;
+    /**
+     * All open parser preview states that depend on the given lexer grammar
+     * (shared lg file, naming convention, or imported lexer).
+     */
+    @NotNull
+    public List<PreviewState> getAssociatedParsersIfLexer(String grammarFileName) {
+        List<PreviewState> matches = new ArrayList<>();
+        for (Map.Entry<String, PreviewState> entry : grammarToPreviewState.entrySet()) {
+            PreviewState s = entry.getValue();
+            if (s == null) {
+                continue;
+            }
+            // Only associate when lexer filename actually matches; never treat BAD_LEXER_GRAMMAR
+            // as a wildcard match for every lexer save.
+            if (s.lg != null && s.lg != ParsingUtils.BAD_LEXER_GRAMMAR
+                    && sameFile(grammarFileName, s.lg.fileName)) {
+                // s has a lexer with same filename, see if there is a parser grammar
+                // (not a combined grammar)
+                if (s.g != null && s.g.getType() == ANTLRParser.PARSER) {
+                    matches.add(s);
+                    continue;
+                }
+            }
+
+            // Fallback: ParserFoo.g4 often pairs with LexerFoo.g4 / FooLexer.g4 by naming convention
+            if (s.g != null && s.g.getType() == ANTLRParser.PARSER && s.grammarFile != null) {
+                String parserPath = s.grammarFile.getPath();
+                String expectedLexer = ParsingUtils.getLexerNameFromParserFileName(parserPath);
+                if (expectedLexer != null && sameFile(grammarFileName, expectedLexer)) {
+                    if (!matches.contains(s)) {
+                        matches.add(s);
+                    }
+                    continue;
+                }
+            }
+
+            if (s.g != null && s.g.importedGrammars != null) {
+                for (Grammar importedGrammar : s.g.importedGrammars) {
+                    // Only associate when the imported grammar is a lexer (token dependency)
+                    if (sameFile(grammarFileName, importedGrammar.fileName)
+                            && importedGrammar instanceof LexerGrammar) {
+                        if (!matches.contains(s)) {
+                            matches.add(s);
                         }
+                        break;
                     }
                 }
             }
         }
-        return null;
+        return matches;
     }
 
     private boolean sameFile(String pathOne, String pathTwo) {
@@ -438,28 +578,51 @@ public class ANTLRv4PluginController {
     }
 
     public void parseText(final VirtualFile grammarFile, String inputText) {
+        if (projectIsClosed || project.isDisposed()) {
+            return;
+        }
         final PreviewState previewState = getPreviewState(grammarFile);
         // No need to parse empty text during unit tests, yet...
         if (inputText.isEmpty() && ApplicationManager.getApplication().isUnitTestMode()) return;
+        // Cancel any in-flight parse so out-of-order completions cannot overwrite newer results
+        if (parsingProgressIndicator != null) {
+            parsingProgressIndicator.cancel();
+            parsingProgressIndicator = null;
+        }
+        final long generation = parseGeneration.incrementAndGet();
+        // Snapshot grammar objects under the same lock used by reload
+        final Grammar g;
+        final LexerGrammar lg;
+        final String startRuleName;
+        synchronized (previewState) {
+            g = previewState.g;
+            lg = previewState.lg;
+            startRuleName = previewState.startRuleName;
+        }
         // Parse text in a background thread to avoid freezing the UI if the grammar is badly written
         // and takes forever to interpret the input.
         parsingProgressIndicator = BackgroundTaskUtil.executeAndTryWait(
                 (indicator) -> {
                     long start = System.nanoTime();
 
-                    previewState.parsingResult = ParsingUtils.parseText(
-                            previewState.g, previewState.lg, previewState.startRuleName,
+                    ParsingResult result = ParsingUtils.parseText(
+                            g, lg, startRuleName,
                             grammarFile, inputText, project
                     );
                     return () -> {
-                        if (this.project != null && !this.project.isDisposed()) {
-                            this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).onParsingCompleted(previewState, System.nanoTime() - start);
+                        // Only commit if this is still the latest requested parse
+                        if (generation != parseGeneration.get() || indicator.isCanceled()
+                                || projectIsClosed || project.isDisposed()) {
+                            return;
                         }
+                        previewState.parsingResult = result;
+                        project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC)
+                                .onParsingCompleted(previewState, System.nanoTime() - start);
                     };
                 },
                 () -> {
-                    if (this.project != null && !this.project.isDisposed()) {
-                        this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).notifySlowParsing();
+                    if (generation == parseGeneration.get() && !projectIsClosed && !project.isDisposed()) {
+                        project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).notifySlowParsing();
                     }
                 },
                 ProgressWindow.DEFAULT_PROGRESS_DIALOG_POSTPONE_TIME_MILLIS,
@@ -468,22 +631,25 @@ public class ANTLRv4PluginController {
     }
 
     public void abortCurrentParsing() {
+        parseGeneration.incrementAndGet();
         if (parsingProgressIndicator != null) {
             parsingProgressIndicator.cancel();
             parsingProgressIndicator = null;
-            if (this.project != null && !this.project.isDisposed()) {
-                this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).onParsingCancelled();
+            if (!projectIsClosed && !project.isDisposed()) {
+                project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).onParsingCancelled();
             }
         }
     }
 
     public void startParsing() {
-        parsingProgressIndicator = null;
-        if (this.project != null && !this.project.isDisposed()) {
-            this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).clearParseErrors();
+        parseGeneration.incrementAndGet();
+        if (parsingProgressIndicator != null) {
+            parsingProgressIndicator.cancel();
+            parsingProgressIndicator = null;
         }
-        if (this.project != null && !this.project.isDisposed()) {
-            this.project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).startParsing();
+        if (!projectIsClosed && !project.isDisposed()) {
+            project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).clearParseErrors();
+            project.getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).startParsing();
         }
     }
 
@@ -498,36 +664,35 @@ public class ANTLRv4PluginController {
         }
         ApplicationManager.getApplication().invokeLater(
                 () -> {
+                    if (project.isDisposed()) {
+                        return;
+                    }
                     ToolWindow toolWindow = ToolWindowManager.getInstance(project).getToolWindow(ConsoleToolWindow.WINDOW_ID);
                     if (toolWindow != null) {
+                        // ensure content is created so buffered messages can flush
+                        toolWindow.getContentManager();
                         if (!toolWindow.isVisible()) {
                             toolWindow.show(runnable);
-                        } else {
-                            if (runnable != null) {
-                                runnable.run();
-                            }
+                        } else if (runnable != null) {
+                            runnable.run();
                         }
+                    } else if (runnable != null) {
+                        // Still publish so ConsoleToolWindow can buffer until content exists
+                        runnable.run();
                     }
-                }
+                },
+                project.getDisposed()
         );
     }
 
     public @NotNull PreviewState getPreviewState(VirtualFile grammarFile) {
-        // make sure only one thread tries to add a preview state object for a given file
         String grammarFileName = grammarFile.getPath();
-        // Have we seen this grammar before?
-        if (grammarToPreviewState != null) {
-            PreviewState stateForCurrentGrammar = grammarToPreviewState.get(grammarFileName);
-            if (stateForCurrentGrammar != null) {
-                return stateForCurrentGrammar; // seen this before
-            }
-        }
-        // not seen, must create state
-        PreviewState stateForCurrentGrammar = new PreviewState(project, grammarFile);
-        if (grammarToPreviewState != null) {
-            grammarToPreviewState.put(grammarFileName, stateForCurrentGrammar);
-        }
-        return stateForCurrentGrammar;
+        return grammarToPreviewState.computeIfAbsent(grammarFileName, path -> new PreviewState(project, grammarFile));
+    }
+
+    @Nullable
+    public PreviewState getPreviewStateIfPresent(VirtualFile grammarFile) {
+        return grammarToPreviewState.get(grammarFile.getPath());
     }
 
     public Editor getEditor(VirtualFile file) {
@@ -596,6 +761,9 @@ public class ANTLRv4PluginController {
     private class GrammarEditorMouseAdapter implements EditorMouseListener {
         @Override
         public void mouseClicked(EditorMouseEvent e) {
+            if (e.getEditor().getProject() != project) {
+                return;
+            }
             Document doc = e.getEditor().getDocument();
             VirtualFile file = FileDocumentManager.getInstance().getFile(doc);
             if (file != null && file.getName().endsWith(".g4")) {
@@ -609,15 +777,23 @@ public class ANTLRv4PluginController {
         public void contentsChanged(VirtualFileEvent event) {
             final VirtualFile file = event.getFile();
             if (!file.getName().endsWith(".g4")) return;
-            if (!projectIsClosed && !ApplicationManager.getApplication().isUnitTestMode()) {
-                grammarFileSavedEvent(ANTLRv4PluginController.this.project, file);
+            if (projectIsClosed || project.isDisposed() || ApplicationManager.getApplication().isUnitTestMode()) {
+                return;
             }
+            // VirtualFileListener is application-wide; only handle files in this project
+            if (!ProjectFileIndex.getInstance(project).isInContent(file)) {
+                return;
+            }
+            grammarFileSavedEvent(project, file);
         }
     }
 
     public class MyFileEditorManagerAdapter implements FileEditorManagerListener {
         @Override
         public void fileOpenedSync(@NotNull FileEditorManager source, @NotNull VirtualFile file, @NotNull Pair<FileEditor[], FileEditorProvider[]> editors) {
+            if (projectIsClosed || project.isDisposed()) {
+                return;
+            }
             currentEditorFileChangedEvent(project, null, file, false);
         }
 
@@ -676,7 +852,11 @@ public class ANTLRv4PluginController {
 
         @Override
         public void fileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
-            if (!projectIsClosed && source.getSelectedEditor() != null && source.getSelectedEditor().getFile().equals(file)) {
+            if (projectIsClosed || project.isDisposed()) {
+                return;
+            }
+            // Clean up whenever the file is no longer open (not only when it was the selected tab)
+            if (!source.isFileOpen(file)) {
                 editorFileClosedEvent(file);
             }
         }

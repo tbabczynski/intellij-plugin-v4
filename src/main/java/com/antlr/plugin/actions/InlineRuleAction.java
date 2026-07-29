@@ -52,6 +52,9 @@ public class InlineRuleAction extends AnAction {
 
         String grammarText = psiFile.getText();
         ParsingResult results = ParsingUtils.parseANTLRGrammar(grammarText);
+        if (results == null || results.tree == null || results.parser == null) {
+            return;
+        }
         Parser parser = results.parser;
         ParseTree tree = results.tree;
 
@@ -123,11 +126,15 @@ public class InlineRuleAction extends AnAction {
         Token start = ruleDefNode.getStart();
         Token stop = ruleDefNode.getStop();
 
-        // check for direct recursive, in which case we don't delete it
+        // Check direct recursion against refs in the *new* tree (old nodes are stale)
         boolean ruleIsDirectlyRecursive = false;
-        for (TerminalNode t : rrefNodes) {
-            if (Trees.isAncestorOf(ruleDefNode, t)) {
-                ruleIsDirectlyRecursive = true;
+        List<TerminalNode> newRrefNodes = RefactorUtils.getAllRuleRefNodes(parser, tree, ruleName);
+        if (newRrefNodes != null) {
+            for (TerminalNode t : newRrefNodes) {
+                if (Trees.isAncestorOf(ruleDefNode, t)) {
+                    ruleIsDirectlyRecursive = true;
+                    break;
+                }
             }
         }
 

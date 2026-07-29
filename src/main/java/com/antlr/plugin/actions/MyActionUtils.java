@@ -133,13 +133,21 @@ public class MyActionUtils {
     public static PsiElement getSelectedPsiElement(AnActionEvent e) {
         Editor editor = e.getData(PlatformDataKeys.EDITOR);
 
-        if (editor == null) { // not in editor
+        if (editor == null) { // not in editor (structure view / nav bar)
             PsiElement selectedNavElement = e.getData(LangDataKeys.PSI_ELEMENT);
-            // in nav bar?
-            if (selectedNavElement == null || !(selectedNavElement instanceof ParserRuleRefNode)) {
+            if (selectedNavElement == null) {
                 return null;
             }
-            return selectedNavElement;
+            if (selectedNavElement instanceof ParserRuleRefNode
+                    || selectedNavElement instanceof LexerRuleRefNode) {
+                return selectedNavElement;
+            }
+            // Structure view selects SpecNodes; expose the name identifier for refactor actions
+            if (selectedNavElement instanceof RuleSpecNode) {
+                GrammarElementRefNode nameId = ((RuleSpecNode) selectedNavElement).getNameIdentifier();
+                return nameId != null ? nameId : selectedNavElement;
+            }
+            return null;
         }
 
         // in editor

@@ -56,7 +56,7 @@ public class AnltrErrorReportSubmitter extends ErrorReportSubmitter {
         new Task.Backgroundable(project, "Submitting...") {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
-                buildErrorMsg(project, ideaLoggingEvent, consumer);
+                buildErrorMsg(project, ideaLoggingEvent, additionalInfo, consumer);
             }
 
             @Override
@@ -88,7 +88,8 @@ public class AnltrErrorReportSubmitter extends ErrorReportSubmitter {
         return stringBuilder.toString();
     }
 
-    private void buildErrorMsg(Project project, IdeaLoggingEvent event, Consumer<? super SubmittedReportInfo> consumer) {
+    private void buildErrorMsg(Project project, IdeaLoggingEvent event, @Nullable String additionalInfo,
+                               Consumer<? super SubmittedReportInfo> consumer) {
         StringBuilder stringBuilder = new StringBuilder();
         String id = md5(StringKt.title(event.getThrowableText()));
         stringBuilder.append(":warning:_`[Auto Generated Report]-=").append(id).append("=-`_").append("\n");
@@ -110,11 +111,16 @@ public class AnltrErrorReportSubmitter extends ErrorReportSubmitter {
         stringBuilder.append("Operating system: ").append(SystemInfo.getOsNameAndVersion()).append("\n");
         stringBuilder.append("Last action id: ").append(IdeaLogger.ourLastActionId).append("\n");
         stringBuilder.append("plugins: ").append(collectPlugins()).append("\n");
+        if (StringUtils.isNotBlank(additionalInfo)) {
+            stringBuilder.append("\n");
+            stringBuilder.append("## Additional Info").append("\n");
+            stringBuilder.append(additionalInfo).append("\n");
+        }
         stringBuilder.append("\n");
         stringBuilder.append("## Stack Trace").append("\n");
         stringBuilder.append("```").append("\n");
         stringBuilder.append(event.getThrowableText()).append("\n");
-        stringBuilder.append("````").append("\n");
+        stringBuilder.append("```").append("\n");
         GitHubDeviceAuthApis gitHubDeviceAuthApis = new GitHubDeviceAuthApis();
         try {
             IssueInfo.ItemsDTO itemsDTO = gitHubDeviceAuthApis.findIssue("mbtsp/intellij-plugin-v4", id);

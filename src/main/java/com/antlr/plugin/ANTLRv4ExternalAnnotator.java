@@ -3,8 +3,8 @@ package com.antlr.plugin;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.lang.annotation.*;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.antlr.plugin.actions.AnnotationIntentActionsFactory;
 import com.antlr.plugin.toolwindow.PreViewToolWindow;
@@ -18,6 +18,7 @@ import org.antlr.v4.tool.ErrorSeverity;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,14 +34,17 @@ public class ANTLRv4ExternalAnnotator extends ExternalAnnotator<PsiFile, List<Gr
     }
 
     /**
-     * Called 2nd; run antlr on file
+     * Called 2nd; run antlr on file.
+     * Only PSI reads are under a short read action; ANTLR analysis runs without holding the lock.
      */
     @Nullable
     @Override
     public List<GrammarIssue> doAnnotate(final PsiFile file) {
-        return ApplicationManager.getApplication().runReadAction((Computable<List<GrammarIssue>>) () ->
-                GrammarIssuesCollector.collectGrammarIssues(file)
-        );
+        VirtualFile vFile = file.getVirtualFile();
+        if (vFile == null) {
+            return Collections.emptyList();
+        }
+        return GrammarIssuesCollector.collectGrammarIssues(file);
     }
 
     /**
@@ -59,17 +63,29 @@ public class ANTLRv4ExternalAnnotator extends ExternalAnnotator<PsiFile, List<Gr
         }
 
         final ANTLRv4PluginController controller = ANTLRv4PluginController.getInstance(file.getProject());
-        if (controller != null && !ApplicationManager.getApplication().isUnitTestMode()) {
-            if (!file.getProject().isDisposed()) {
-                file.getProject().getMessageBus().syncPublisher(PreViewToolWindow.TOPIC).autoRefreshPreview(file.getVirtualFile());
+        if (controller != null && !ApplicationManager.getApplication().isUnitTestMode()
+                && !file.getProject().isDisposed()) {
+            VirtualFile vFile = file.getVirtualFile();
+            if (vFile != null) {
+                // Defer preview refresh so annotation apply stays lightweight on the EDT
+                ApplicationManager.getApplication().invokeLater(
+                        () -> {
+                            if (!file.getProject().isDisposed()) {
+                                file.getProject().getMessageBus()
+                                        .syncPublisher(PreViewToolWindow.TOPIC)
+                                        .autoRefreshPreview(vFile);
+                            }
+                        },
+                        file.getProject().getDisposed()
+                );
             }
-
         }
     }
 
     private void annotateFileIssue(@NotNull PsiFile file, @NotNull AnnotationHolder holder, GrammarIssue issue) {
-        Annotation annotation = holder.createWarningAnnotation(file, issue.getAnnotation());
-        annotation.setFileLevelAnnotation(true);
+        holder.newAnnotation(HighlightSeverity.WARNING, issue.getAnnotation())
+                .fileLevel()
+                .create();
     }
 
     private void annotateIssue(@NotNull PsiFile file, @NotNull AnnotationHolder holder, GrammarIssue issue) {
@@ -111,8 +127,12 @@ public class ANTLRv4ExternalAnnotator extends ExternalAnnotator<PsiFile, List<Gr
     private boolean tokenBelongsToFile(Token t, @NotNull PsiFile file) {
         CharStream inputStream = t.getInputStream();
         if (inputStream instanceof ANTLRFileStream) {
+            VirtualFile vFile = file.getVirtualFile();
+            if (vFile == null) {
+                return false;
+            }
             // Not equal if the token belongs to an imported grammar
-            return inputStream.getSourceName().equals(file.getVirtualFile().getCanonicalPath());
+            return inputStream.getSourceName().equals(vFile.getCanonicalPath());
         }
 
         return true;
@@ -123,34 +143,33 @@ public class ANTLRv4ExternalAnnotator extends ExternalAnnotator<PsiFile, List<Gr
         switch (severity) {
             case ERROR:
             case ERROR_ONE_OFF:
-            case FATAL:
+            case FATAL: {
                 AnnotationBuilder annotationBuilder = holder.newAnnotation(HighlightSeverity.ERROR, issue.getAnnotation()).range(range);
                 if (intentionAction.isPresent()) {
                     annotationBuilder = annotationBuilder.newFix(intentionAction.get()).range(range).registerFix();
                 }
                 annotationBuilder.create();
+                break;
+            }
             case WARNING:
+            case WARNING_ONE_OFF: {
                 AnnotationBuilder warningBuilder = holder.newAnnotation(HighlightSeverity.WARNING, issue.getAnnotation()).range(range);
                 if (intentionAction.isPresent()) {
                     warningBuilder = warningBuilder.newFix(intentionAction.get()).range(range).registerFix();
                 }
                 warningBuilder.create();
-
-            case WARNING_ONE_OFF:
-            case INFO:
-			/* When trying to remove the deprecation warning, you will need something like this:
-			AnnotationBuilder builder = holder.newAnnotation(HighlightSeverity.WEAK_WARNING, issue.getAnnotation()).range(range);
-			 */
+                break;
+            }
+            case INFO: {
                 AnnotationBuilder infoBuilder = holder.newAnnotation(HighlightSeverity.INFORMATION, issue.getAnnotation()).range(range);
                 if (intentionAction.isPresent()) {
                     infoBuilder = infoBuilder.newFix(intentionAction.get()).range(range).registerFix();
                 }
                 infoBuilder.create();
+                break;
+            }
             default:
                 break;
         }
-
     }
-
-
 }

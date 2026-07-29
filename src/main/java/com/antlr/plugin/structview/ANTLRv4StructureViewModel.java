@@ -1,30 +1,37 @@
 package com.antlr.plugin.structview;
 
 import com.antlr.plugin.ANTLRv4FileRoot;
+import com.antlr.plugin.psi.LexerRuleRefNode;
 import com.antlr.plugin.psi.LexerRuleSpecNode;
+import com.antlr.plugin.psi.ModeSpecNode;
+import com.antlr.plugin.psi.ParserRuleRefNode;
 import com.antlr.plugin.psi.ParserRuleSpecNode;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.structureView.StructureViewModel;
-import com.intellij.ide.structureView.StructureViewModelBase;
 import com.intellij.ide.structureView.StructureViewTreeElement;
+import com.intellij.ide.structureView.TextEditorBasedStructureViewModel;
 import com.intellij.ide.util.treeView.smartTree.ActionPresentation;
 import com.intellij.ide.util.treeView.smartTree.ActionPresentationData;
 import com.intellij.ide.util.treeView.smartTree.Sorter;
 import com.intellij.ide.util.treeView.smartTree.SorterUtil;
+import com.intellij.openapi.editor.Editor;
 import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Comparator;
 
 public class ANTLRv4StructureViewModel
-        extends StructureViewModelBase
-//	extends TextEditorBasedStructureViewModel
+        extends TextEditorBasedStructureViewModel
         implements StructureViewModel.ElementInfoProvider {
     private static final Sorter PARSER_LEXER_RULE_SORTER = new Sorter() {
         public Comparator<?> getComparator() {
             return (o1, o2) -> {
                 String s1 = SorterUtil.getStringPresentation(o1);
                 String s2 = SorterUtil.getStringPresentation(o2);
+                if (s1.isEmpty() || s2.isEmpty()) {
+                    return s1.compareTo(s2);
+                }
                 // flip case of char 0 so it puts parser rules first
                 if (Character.isLowerCase(s1.charAt(0))) {
                     s1 = Character.toUpperCase(s1.charAt(0)) + s1.substring(1);
@@ -46,7 +53,6 @@ public class ANTLRv4StructureViewModel
 
         @NotNull
         public ActionPresentation getPresentation() {
-            // how it's described in sort by dropdown in nav window.
             String name = "Sort by rule type";
             return new ActionPresentationData(name, name, AllIcons.ObjectBrowser.SortByType);
         }
@@ -57,13 +63,18 @@ public class ANTLRv4StructureViewModel
         }
     };
 
-    ANTLRv4FileRoot rootElement;
+    private final ANTLRv4FileRoot rootElement;
 
-    public ANTLRv4StructureViewModel(ANTLRv4FileRoot rootElement) {
-        super(rootElement, new ANTLRv4StructureViewElement(rootElement));
+    public ANTLRv4StructureViewModel(@NotNull ANTLRv4FileRoot rootElement, @Nullable Editor editor) {
+        super(editor, rootElement);
         this.rootElement = rootElement;
     }
 
+    @NotNull
+    @Override
+    public StructureViewTreeElement getRoot() {
+        return new ANTLRv4StructureViewElement(rootElement);
+    }
 
     @NotNull
     public Sorter[] getSorters() {
@@ -78,27 +89,28 @@ public class ANTLRv4StructureViewModel
     @Override
     public boolean isAlwaysShowsPlus(StructureViewTreeElement element) {
         Object value = element.getValue();
-        return value instanceof ANTLRv4FileRoot;
+        return value instanceof ANTLRv4FileRoot || value instanceof ModeSpecNode;
     }
 
     @Override
     public boolean isAlwaysLeaf(StructureViewTreeElement element) {
         Object value = element.getValue();
-        return value instanceof ParserRuleSpecNode || value instanceof LexerRuleSpecNode;
+        return value instanceof ParserRuleSpecNode
+                || value instanceof LexerRuleSpecNode
+                || value instanceof ParserRuleRefNode
+                || value instanceof LexerRuleRefNode;
     }
 
-    /**
-     * Intellij: The implementation of StructureViewTreeElement.getChildren()
-     * needs to be matched by TextEditorBasedStructureViewModel.getSuitableClasses().
-     * The latter method returns an array of PsiElement-derived classes which can
-     * be shown as structure view elements, and is used to select the Structure
-     * View item matching the cursor position when the structure view is first
-     * opened or when the "Autoscroll from source" option is used.
-     */
     @NotNull
+    @Override
     protected Class<?>[] getSuitableClasses() {
-        return new Class[]{ANTLRv4FileRoot.class,
+        return new Class[]{
+                ANTLRv4FileRoot.class,
+                ModeSpecNode.class,
                 LexerRuleSpecNode.class,
-                ParserRuleSpecNode.class};
+                ParserRuleSpecNode.class,
+                LexerRuleRefNode.class,
+                ParserRuleRefNode.class
+        };
     }
 }
