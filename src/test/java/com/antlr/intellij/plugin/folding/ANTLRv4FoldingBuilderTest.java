@@ -1,18 +1,16 @@
-package com.antlr.plugin.folding;
+package com.antlr.intellij.plugin.folding;
 
-import com.antlr.plugin.TestUtils;
+import com.antlr.intellij.plugin.TestUtils;
 import com.intellij.codeInsight.folding.CodeFoldingManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.FoldRegion;
 import com.intellij.testFramework.EditorTestUtil;
-import com.intellij.testFramework.fixtures.LightPlatformCodeInsightFixture4TestCase;
-import org.junit.Test;
+import com.intellij.testFramework.fixtures.LightPlatformCodeInsightFixtureTestCase;
 
 import java.lang.reflect.Method;
 
-public class ANTLRv4FoldingBuilderTest extends LightPlatformCodeInsightFixture4TestCase {
+public class ANTLRv4FoldingBuilderTest extends LightPlatformCodeInsightFixtureTestCase {
 
-	@Test
 	public void test_folding_should_not_throw_on_incomplete_prequel() {
 		// Given
 		myFixture.configureByText("foo.g4", "grammar foo;\n @\n");
@@ -25,7 +23,6 @@ public class ANTLRv4FoldingBuilderTest extends LightPlatformCodeInsightFixture4T
 		assertEquals(0, allFoldRegions.length);
 	}
 
-	@Test
 	public void test_should_not_fold_single_line() {
 		// Given
 		myFixture.configureByText("foo.g4", "grammar foo;\n @members { int i; }\n");

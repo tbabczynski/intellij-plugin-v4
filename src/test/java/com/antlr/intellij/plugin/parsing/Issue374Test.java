@@ -1,4 +1,4 @@
-package com.antlr.plugin.parsing;
+package com.antlr.intellij.plugin.parsing;
 
 import junit.framework.TestCase;
 import org.antlr.intellij.adaptor.parser.SyntaxErrorListener;

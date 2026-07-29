@@ -1,46 +1,40 @@
-package com.antlr.plugin.psi;
+package com.antlr.intellij.plugin.psi;
 
 import com.antlr.plugin.psi.*;
 import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiReference;
-import com.intellij.testFramework.fixtures.LightPlatformCodeInsightFixture4TestCase;
+import com.intellij.testFramework.fixtures.LightPlatformCodeInsightFixtureTestCase;
 import com.intellij.usageView.UsageInfo;
 import com.antlr.plugin.ANTLRv4FileRoot;
 import org.jetbrains.annotations.Nullable;
-import org.junit.Test;
 
 import java.util.Collection;
 import java.util.function.Consumer;
 
-public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestCase {
-	@Test
+public class GrammarElementRefTest extends LightPlatformCodeInsightFixtureTestCase {
 	public void testFindUsagesOfLexerRule() {
 		Collection<UsageInfo> ruleUsages = myFixture.testFindUsages("SimpleGrammar.g4");
 		assertEquals(3, ruleUsages.size());
 	}
 
-	@Test
 	public void testFindUsagesOfParserRule() {
 		Collection<UsageInfo> ruleUsages = myFixture.testFindUsages("SimpleGrammar2.g4");
 		assertEquals(1, ruleUsages.size());
 	}
 
-	@Test
 	public void testHighlightUsagesOfLexerRule() {
 		RangeHighlighter[] usages = myFixture.testHighlightUsages("SimpleGrammar.g4");
 
 		assertEquals(4, usages.length);
 	}
 
-	@Test
 	public void testHighlightUsagesOfParserRule() {
 		RangeHighlighter[] usages = myFixture.testHighlightUsages("SimpleGrammar2.g4");
 
 		assertEquals(2, usages.length);
 	}
 
-	@Test
 	public void testReferenceToLexerRule() {
 		myFixture.configureByFiles("SimpleGrammar.g4");
 
@@ -51,7 +45,6 @@ public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestC
 		assertResolvedMatches(LexerRuleSpecNode.class, element -> assertEquals("TOKEN1", element.getName()));
 	}
 
-	@Test
 	public void testReferenceToParserRule() {
 		myFixture.configureByFiles("SimpleGrammar.g4");
 
@@ -60,7 +53,6 @@ public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestC
 		assertResolvedMatches(ParserRuleSpecNode.class, element -> assertEquals("rule1", element.getName()));
 	}
 
-	@Test
 	public void testReferenceToLexerRuleFromFragment() {
 		myFixture.configureByFiles("FooLexer.g4");
 
@@ -71,7 +63,6 @@ public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestC
 		assertResolvedMatches(LexerRuleSpecNode.class, element -> assertEquals("Fragment2", element.getName()));
 	}
 
-	@Test
 	public void testReferenceToTokensSpec() {
 		myFixture.configureByFiles("FooLexer.g4");
 
@@ -82,7 +73,6 @@ public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestC
 		});
 	}
 
-	@Test
 	public void testReferenceToChannelsSpec() {
 		myFixture.configureByFiles("FooLexer.g4");
 
@@ -93,7 +83,6 @@ public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestC
 		});
 	}
 
-	@Test
 	public void testReferencesInModes() {
 		myFixture.configureByFiles("Modes.g4");
 
@@ -134,7 +123,6 @@ public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestC
 		});
 	}
 
-	@Test
 	public void testReferencesFromParserToLexer() {
 		myFixture.configureByFiles("FooParser.g4", "FooLexer.g4");
 
@@ -159,7 +147,6 @@ public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestC
 		});
 	}
 
-	@Test
 	public void testReferencesToTokenVocabFile() {
 		myFixture.configureByFiles("FooParser.g4", "FooLexer.g4");
 
@@ -167,7 +154,6 @@ public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestC
 		assertResolvedMatches(ANTLRv4FileRoot.class, file -> assertEquals("FooLexer.g4", file.getName()));
 	}
 
-	@Test
 	public void testReferencesToTokenVocabFileString() {
 		myFixture.configureByFiles("FooParser2.g4", "FooLexer.g4");
 
@@ -175,7 +161,6 @@ public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestC
 		assertResolvedMatches(ANTLRv4FileRoot.class, file -> assertEquals("FooLexer.g4", file.getName()));
 	}
 
-	@Test
 	public void testReferenceToImportedFile() {
 		myFixture.configureByFiles("importing.g4", "imported.g4");
 
@@ -183,7 +168,6 @@ public class GrammarElementRefTest extends LightPlatformCodeInsightFixture4TestC
 		assertResolvedMatches(ANTLRv4FileRoot.class, file -> assertEquals("imported.g4", file.getName()));
 	}
 
-	@Test
 	public void testReferenceToRuleInImportedFile() {
 		myFixture.configureByFiles("importing.g4", "imported.g4", "imported2.g4", "imported3.g4");
 

@@ -1,4 +1,4 @@
-package com.antlr.plugin.actions;
+package com.antlr.intellij.plugin.actions;
 
 import com.antlr.plugin.actions.AnnotationIntentActionsFactory;
 import com.intellij.codeInsight.intention.IntentionAction;

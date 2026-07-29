@@ -30,13 +30,12 @@ repositories {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
-    toolchain { languageVersion.set(JavaLanguageVersion.of(21)) }
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 // Set the JVM language level used to build the project. Use Java 11 for 2020.3+, and Java 17 for 2022.2+.
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(17)
 }
 
 
@@ -53,8 +52,7 @@ dependencies {
     implementation(libs.report)
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {
-//        create(providers.gradleProperty("platformType"), providers.gradleProperty("platformVersion"))
-        intellijIdea(providers.gradleProperty("platformVersion")) ;
+        create(providers.gradleProperty("platformType"), providers.gradleProperty("platformVersion"))
         // Plugin Dependencies. Uses `platformBundledPlugins` property from the gradle.properties file for bundled IntelliJ Platform plugins.
         bundledPlugins(providers.gradleProperty("platformBundledPlugins").map { it.split(',') })
 

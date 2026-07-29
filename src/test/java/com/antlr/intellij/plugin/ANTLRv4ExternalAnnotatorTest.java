@@ -1,4 +1,4 @@
-package com.antlr.plugin;
+package com.antlr.intellij.plugin;
 
 public class ANTLRv4ExternalAnnotatorTest {
 
