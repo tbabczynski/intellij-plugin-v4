@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+### Fixed
+- Avoid hard link to removed `StoreUtil.saveSettings(ComponentManager, boolean)` (IJ 2025.3+ / Plugin Verifier binary incompatibility); flush settings via reflection + public `Project.save()` fallback
 
 ## [2026.2.0]
 ### Changed
