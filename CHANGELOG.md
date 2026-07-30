@@ -5,7 +5,7 @@
 ## [Unreleased]
 
 ### Fixed
-- Avoid hard link to removed `StoreUtil.saveSettings(ComponentManager, boolean)` (IJ 2025.3+ / Plugin Verifier binary incompatibility); flush settings via reflection + public `Project.save()` fallback
+- Drop forced `StoreUtil.saveSettings` flush for grammar properties; rely on `PersistentStateComponent.getState()` (same pattern as other plugins; fixes IJ 2025.3+ binary incompatibility)
 
 ## [2026.2.0]
 ### Changed

@@ -1,7 +1,6 @@
 package com.antlr.plugin.actions;
 
 import com.antlr.plugin.configdialogs.ANTLRv4GrammarProperties;
-import com.antlr.plugin.configdialogs.ANTLRv4ToolGrammarPropertiesComponent;
 import com.antlr.plugin.configdialogs.ANTLRv4ToolGrammarPropertiesStore;
 import com.antlr.plugin.configdialogs.ConfigANTLRPerGrammar;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
@@ -62,8 +61,6 @@ public class ConfigureANTLRAction extends AnAction implements DumbAware {
                         project, companion.getPath());
                 configDialog.saveValues(project, companionKey);
             }
-            // Ensure unique rows are flushed to ANTLRv4ToolGrammarProperties.xml immediately
-            ANTLRv4ToolGrammarPropertiesComponent.persistNow(project);
         }
     }
 
