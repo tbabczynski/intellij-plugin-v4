@@ -133,7 +133,19 @@ public class RunANTLROnGrammarFile extends Task.Modal {
         String libDir = props != null
                 ? props.resolveLibDir(project, getParentDir(grammarFile))
                 : getParentDir(grammarFile);
+        // Same as antlr(): Tool(args) can emit DIR_NOT_FOUND for -lib before listeners attach,
+        // then silently fall back libDirectory to ".". Do not write .tokens with a wrong lib root.
         Tool tool = new Tool(new String[]{"-o", outputDirName, "-lib", libDir});
+        if (tool.getNumErrors() > 0) {
+            LOG.warn("Skipping .tokens write for " + grammarFile.getName()
+                    + ": invalid ANTLR options (-lib=" + libDir + ", -o=" + outputDirName + ")");
+            ConsoleUtils.consolePrint(project,
+                    "error: skipped writing .tokens for " + grammarFile.getName()
+                            + " due to invalid ANTLR options (-lib=" + libDir + ", -o=" + outputDirName + "). "
+                            + "Check Configure ANTLR.\n",
+                    ConsoleViewContentType.ERROR_OUTPUT);
+            return;
+        }
         tool.errMgr = new PluginIgnoreMissingTokensFileErrorManager(tool);
         tool.errMgr.setFormat("antlr");
         tool.removeListeners();
@@ -282,10 +294,13 @@ public class RunANTLROnGrammarFile extends Task.Modal {
         if (errorsFromArgs > 0) {
             listener.hasErrors = true;
             listener.hasOutput = true;
-            // Original messages went to stderr; surface them in ANTLR Console for the user.
+            // Original messages went to stderr; surface actionable paths in ANTLR Console.
+            String lib = antlr.libDirectory;
+            String out = antlr.outputDirectory;
             ConsoleUtils.consolePrint(project,
-                    "error: " + errorsFromArgs + " problem(s) in ANTLR options "
-                            + "(often invalid -lib / -o directory). Check Configure ANTLR paths.\n",
+                    "error: " + errorsFromArgs + " problem(s) in ANTLR options"
+                            + " (-lib=" + lib + ", -o=" + out + ")."
+                            + " Invalid directories are rejected; check Configure ANTLR.\n",
                     ConsoleViewContentType.ERROR_OUTPUT);
             // After DIR_NOT_FOUND, Tool silently falls back libDirectory to "."; do not continue
             // and pretend generation succeeded with a wrong lib root.

@@ -149,22 +149,28 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
         // Had to set min size / preferred size in InputPanel.form to get slider to allow left shift of divider
         Splitter splitPane = new Splitter();
         inputPanel = getEditorPanel();
+        splitPane.setFirstComponent(inputPanel.getComponent());
+        // Create Hierarchy / Parse tree before wiring Scroll from Source (needs non-null viewers)
+        splitPane.setSecondComponent(createParseTreeAndProfileTabbedPanel());
         inputPanel.addCaretListener(new CaretListener() {
             @Override
             public void caretPositionChanged(@NotNull CaretEvent event) {
+                if (!scrollFromSource) {
+                    return;
+                }
                 Caret caret = event.getCaret();
-
-                if (scrollFromSource && caret != null) {
-                    int offset = caret.getOffset();
+                if (caret == null) {
+                    return;
+                }
+                int offset = caret.getOffset();
+                if (hierarchyViewer != null) {
                     hierarchyViewer.selectNodeAtOffset(offset);
-                    if (treeViewer != null) {
-                        treeViewer.selectNodeAtOffset(offset);
-                    }
+                }
+                if (treeViewer != null) {
+                    treeViewer.selectNodeAtOffset(offset);
                 }
             }
         });
-        splitPane.setFirstComponent(inputPanel.getComponent());
-        splitPane.setSecondComponent(createParseTreeAndProfileTabbedPanel());
 
         this.add(splitPane, BorderLayout.CENTER);
         this.buttonBar = createButtonBar();

@@ -56,6 +56,7 @@ public class Issue540Test extends BasePlatformTestCase {
     }
 
     private File resolveTokensFile(VirtualFile lexerFile) {
+        String tokensFileName = "TestLexer.tokens";
         VirtualFile contentRoot = ProjectRootManager.getInstance(getProject())
                 .getFileIndex()
                 .getContentRootForFile(lexerFile);
@@ -63,7 +64,7 @@ public class Issue540Test extends BasePlatformTestCase {
         String outDir = ANTLRv4ToolGrammarPropertiesStore
                 .getGrammarProperties(getProject(), lexerFile)
                 .resolveOutputDirName(getProject(), contentRoot, null);
-        return Path.of(outDir, "TestLexer.tokens").toFile();
+        return Path.of(outDir, tokensFileName).toFile();
     }
 
     @Override
