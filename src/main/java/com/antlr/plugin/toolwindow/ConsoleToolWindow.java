@@ -25,7 +25,7 @@ import java.util.List;
  */
 public class ConsoleToolWindow implements ToolWindowFactory {
     public static final Topic<ConsoleListener> TOPIC = new Topic<>(ConsoleListener.class);
-    public static final String WINDOW_ID = "Antlr tool Console";
+    public static final String WINDOW_ID = "ANTLR Console";
     private static final Key<ConsoleView> CONSOLE_KEY = Key.create("antlr.tool.console.view");
     private static final Key<List<Pair<String, ConsoleViewContentType>>> PENDING_KEY =
             Key.create("antlr.tool.console.pending");

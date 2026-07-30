@@ -93,7 +93,7 @@ public class GrammarIssuesCollector {
 
             VirtualFile vfile = file.getVirtualFile();
             if (vfile == null) {
-                LOG.error("doAnnotate no virtual file for " + file);
+                LOG.warn("doAnnotate no virtual file for " + file);
                 return listener.getIssues();
             }
             g.fileName = vfile.getPath();
@@ -111,8 +111,10 @@ public class GrammarIssuesCollector {
             for (GrammarIssue issue : listener.getIssues()) {
                 processIssue(file, issue);
             }
-        } catch (Exception e) {
-            LOG.error("antlr can't process " + file.getName(), e);
+        } catch (Throwable t) {
+            // Bad grammars can throw AIOOBE/NPE inside ANTLR tool (#247). Use warn — LOG.error
+            // submits a plugin error report even when we recovered.
+            LOG.warn("antlr can't process " + file.getName() + ": " + t.getMessage(), t);
         }
         return listener.getIssues();
     }

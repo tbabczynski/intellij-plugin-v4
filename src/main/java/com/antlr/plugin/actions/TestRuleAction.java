@@ -88,6 +88,8 @@ public class TestRuleAction extends AnAction implements DumbAware {
         // Set start rule before showing/loading so async grammar load picks it up
         PreviewState previewState = controller.getPreviewState(grammarFile);
         previewState.startRuleName = ruleName;
+        // #644: Test Rule should open the interactive Input pane, not a stale File selection
+        previewState.inputFile = null;
 
         // Wait until the tool window is shown (content created) before loading/parsing
         controller.showPre(() -> {

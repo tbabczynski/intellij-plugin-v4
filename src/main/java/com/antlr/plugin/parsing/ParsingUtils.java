@@ -5,6 +5,7 @@ import com.antlr.plugin.configdialogs.ANTLRv4GrammarProperties;
 import com.antlr.plugin.parser.ANTLRv4Lexer;
 import com.antlr.plugin.parser.ANTLRv4Parser;
 import com.antlr.plugin.preview.PreviewState;
+import com.antlr.plugin.resolve.TokenVocabResolver;
 import com.antlr.plugin.util.ConsoleUtils;
 import com.intellij.execution.ui.ConsoleViewContentType;
 import com.intellij.openapi.application.ApplicationManager;
@@ -13,7 +14,6 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.antlr.intellij.adaptor.parser.SyntaxErrorListener;
 import org.antlr.runtime.ANTLRStringStream;
@@ -31,6 +31,7 @@ import org.antlr.v4.tool.ErrorType;
 import org.antlr.v4.tool.Grammar;
 import org.antlr.v4.tool.LexerGrammar;
 import org.antlr.v4.tool.Rule;
+import org.antlr.v4.tool.ast.GrammarAST;
 import org.antlr.v4.tool.ast.GrammarRootAST;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -38,6 +39,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.antlr.plugin.configdialogs.ANTLRv4ToolGrammarPropertiesStore.getGrammarProperties;
@@ -99,8 +101,8 @@ public class ParsingUtils {
     public static Token getTokenUnderCursor(PreviewState previewState, int offset) {
         if (previewState == null || previewState.parsingResult == null) return null;
 
-        PreviewParser parser = (PreviewParser) previewState.parsingResult.parser;
-        CommonTokenStream tokenStream = (CommonTokenStream) parser.getInputStream();
+        CommonTokenStream tokenStream = previewState.parsingResult.getTokenStream();
+        if (tokenStream == null) return null;
         return ParsingUtils.getTokenUnderCursor(tokenStream, offset);
     }
 
@@ -180,6 +182,19 @@ public class ParsingUtils {
         return null;
     }
 
+    /**
+     * True when the grammar AST contains embedded actions or semantic predicates.
+     * The live Preview interpreter does not execute these (#523 / #732).
+     */
+    public static boolean grammarHasActionsOrPredicates(@Nullable Grammar g) {
+        if (g == null || g.ast == null) {
+            return false;
+        }
+        List<? extends GrammarAST> actions = g.ast.getNodesWithType(ANTLRParser.ACTION);
+        List<? extends GrammarAST> preds = g.ast.getNodesWithType(ANTLRParser.SEMPRED);
+        return (actions != null && !actions.isEmpty()) || (preds != null && !preds.isEmpty());
+    }
+
     public static ParsingResult parseANTLRGrammar(String text) {
         CodePointCharStream input = CharStreams.fromString(text);
         ANTLRv4Lexer lexer = new ANTLRv4Lexer(input);
@@ -202,9 +217,12 @@ public class ParsingUtils {
                                           final VirtualFile grammarFile,
                                           String inputText,
                                           Project project) {
-        if (g == null || lg == null) {
-            LOG.info("parseText can't parse: missing lexer or parser no Grammar object for " +
+        if (lg == null || lg == BAD_LEXER_GRAMMAR) {
+            LOG.info("parseText can't parse: missing lexer Grammar object for " +
                     (grammarFile != null ? grammarFile.getName() : "<unknown file>"));
+            return null;
+        }
+        if (g == BAD_PARSER_GRAMMAR) {
             return null;
         }
 
@@ -214,13 +232,56 @@ public class ParsingUtils {
                 : CaseChangingStrategy.LEAVE_AS_IS;
         String sourceName = grammarFile != null ? grammarFile.getPath() : "<input>";
         CharStream input = strategy.applyTo(CharStreams.fromString(inputText, sourceName));
-        LexerInterpreter lexEngine;
-        lexEngine = lg.createLexerInterpreter(input);
+        // #163 family: SafeLexerInterpreter avoids EmptyStackException on mismatched popMode
+        LexerInterpreter lexEngine = SafeLexerInterpreter.create(lg, input);
         SyntaxErrorListener syntaxErrorListener = new SyntaxErrorListener();
         lexEngine.removeErrorListeners();
         lexEngine.addErrorListener(syntaxErrorListener);
         CommonTokenStream tokens = new TokenStreamSubset(lexEngine);
-        return parseText(g, lg, startRuleName, syntaxErrorListener, tokens, 0);
+
+        try {
+            // Pure lexer grammar: show a synthetic Tokens tree (no parser)
+            if (g == null) {
+                return tokenizeOnly(syntaxErrorListener, tokens);
+            }
+            return parseText(g, lg, startRuleName, syntaxErrorListener, tokens, 0);
+        } catch (Throwable t) {
+            // Last-resort: never let preview lexer/parser crashes escape as plugin errors
+            LOG.warn("Preview parse failed for " + sourceName, t);
+            syntaxErrorListener.syntaxError(
+                    null, null, 1, 0,
+                    "Preview aborted: " + t.getClass().getSimpleName()
+                            + (t.getMessage() != null ? (": " + t.getMessage()) : ""),
+                    null
+            );
+            return new ParsingResult(null, null, syntaxErrorListener, tokens);
+        }
+    }
+
+    /**
+     * Build a root {@code Tokens} node whose children are the lexed terminals (excluding EOF).
+     */
+    private static ParsingResult tokenizeOnly(SyntaxErrorListener syntaxErrorListener,
+                                              CommonTokenStream tokens) {
+        tokens.fill();
+        ParserRuleContext root = new ParserRuleContext();
+        Token first = null;
+        Token last = null;
+        for (Token t : tokens.getTokens()) {
+            if (t.getType() == Token.EOF) {
+                continue;
+            }
+            root.addChild(new org.antlr.v4.runtime.tree.TerminalNodeImpl(t));
+            if (first == null) {
+                first = t;
+            }
+            last = t;
+        }
+        if (first != null) {
+            root.start = first;
+            root.stop = last != null ? last : first;
+        }
+        return new ParsingResult(null, root, syntaxErrorListener, tokens);
     }
 
     private static ParsingResult parseText(Grammar g,
@@ -255,7 +316,7 @@ public class ParsingUtils {
         ParseTree t = parser.parse(start.index);
 
         if (t != null) {
-            return new ParsingResult(parser, t, syntaxErrorListener);
+            return new ParsingResult(parser, t, syntaxErrorListener, tokens);
         }
         return null;
     }
@@ -307,13 +368,31 @@ public class ParsingUtils {
         if (g.getType() == ANTLRParser.PARSER) {
             lg = loadLexerGrammarFor(g, project);
             if (lg != null) {
-                g.importVocab(lg);
+                try {
+                    g.importVocab(lg);
+                } catch (Throwable t) {
+                    // #177: broken/mismatched .tokens can throw inside Grammar.defineStringLiteral
+                    LOG.warn("importVocab failed for " + grammarFile.getPath(), t);
+                    ConsoleUtils.consolePrint(project,
+                            "Failed to import lexer vocab for " + grammarFile.getName() + ": " + t.getMessage() + "\n",
+                            ConsoleViewContentType.ERROR_OUTPUT);
+                    return null;
+                }
             } else {
                 lg = BAD_LEXER_GRAMMAR;
             }
         }
 
-        antlr.process(g, false);
+        try {
+            antlr.process(g, false);
+        } catch (Throwable t) {
+            // ANTLR tool can NPE / AIOOBE / EmptyStack on invalid grammars (#204/#215/#247)
+            LOG.warn("ANTLR tool process failed for " + grammarFile.getPath(), t);
+            ConsoleUtils.consolePrint(project,
+                    "ANTLR failed to process " + grammarFile.getName() + ": " + t.getMessage() + "\n",
+                    ConsoleViewContentType.ERROR_OUTPUT);
+            return null;
+        }
         if (!listener.grammarErrorMessages.isEmpty()) {
             String msg = Utils.join(listener.grammarErrorMessages.iterator(), "\n");
             ConsoleUtils.consolePrint(project, msg + "\n", ConsoleViewContentType.ERROR_OUTPUT);
@@ -396,8 +475,14 @@ public class ParsingUtils {
             }
         });
         try {
-            countDownLatch.await();
-        } catch (InterruptedException ignored) {
+            // Bounded wait: unbounded await can freeze IDE/tests if parse stalls (#259-related)
+            if (!countDownLatch.await(5L, TimeUnit.MINUTES)) {
+                LOG.warn("Timed out parsing grammar " + grammarFile.getPath());
+                return null;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
         }
         return atomicReference.get();
     }
@@ -415,14 +500,23 @@ public class ParsingUtils {
                 getGrammarProperties(project, g.fileName), project, parserGrammarFile);
         LoadGrammarsToolListener listener = (LoadGrammarsToolListener) antlr.getListeners().get(0);
         LexerGrammar lg = null;
-        VirtualFile lexerGrammarFile;
+        VirtualFile lexerGrammarFile = null;
 
         String vocabName = g.getOptionString("tokenVocab");
         if (vocabName != null) {
-            lexerGrammarFile = VfsUtil.findRelativeFile(
-                    parserGrammarFile == null ? null : parserGrammarFile.getParent(), vocabName + ".g4");
-        } else {
-            lexerGrammarFile = LocalFileSystem.getInstance().findFileByIoFile(new File(getLexerNameFromParserFileName(g.fileName)));
+            // Same -lib / relative-path rules as PSI TokenVocabResolver
+            lexerGrammarFile = TokenVocabResolver.findGrammarFile(vocabName, parserGrammarFile, project);
+        }
+        if (lexerGrammarFile == null) {
+            File companion = new File(getLexerNameFromParserFileName(g.fileName));
+            lexerGrammarFile = LocalFileSystem.getInstance().findFileByIoFile(companion);
+            if (lexerGrammarFile == null || !lexerGrammarFile.exists()) {
+                String base = companion.getName();
+                if (base.endsWith(".g4")) {
+                    base = base.substring(0, base.length() - 3);
+                }
+                lexerGrammarFile = TokenVocabResolver.findGrammarFile(base, parserGrammarFile, project);
+            }
         }
 
         if (lexerGrammarFile != null && lexerGrammarFile.exists()) {
@@ -432,18 +526,23 @@ public class ParsingUtils {
                     lg=lexerGrammar;
                 }
                 if (lg != null) {
-                    antlr.process(lg, false);
+                    try {
+                        antlr.process(lg, false);
+                    } catch (Throwable t) {
+                        LOG.warn("ANTLR failed processing lexer " + lexerGrammarFile.getPath(), t);
+                        lg = null;
+                    }
                 } else {
                     reportBadGrammar(lexerGrammarFile, project);
                 }
             } catch (ClassCastException cce) {
-                LOG.error("File " + lexerGrammarFile + " isn't a lexer grammar", cce);
+                LOG.warn("File " + lexerGrammarFile + " isn't a lexer grammar", cce);
             } catch (Exception e) {
                 String msg = null;
                 if (!listener.grammarErrorMessages.isEmpty()) {
                     msg = ": " + listener.grammarErrorMessages;
                 }
-                LOG.error("File " + lexerGrammarFile + " couldn't be parsed as a lexer grammar" + msg, e);
+                LOG.warn("File " + lexerGrammarFile + " couldn't be parsed as a lexer grammar" + msg, e);
             }
             if (!listener.grammarErrorMessages.isEmpty()) {
                 lg = null;

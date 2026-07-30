@@ -7,8 +7,7 @@ import com.antlr.plugin.parsing.RunANTLROnGrammarFile;
 import com.antlr.plugin.preview.PreviewState;
 import com.antlr.plugin.toolwindow.ConsoleToolWindow;
 import com.antlr.plugin.toolwindow.PreViewToolWindow;
-import com.intellij.ide.plugins.IdeaPluginDescriptor;
-import com.intellij.ide.plugins.PluginManagerCore;
+import com.antlr.plugin.util.PluginDescriptorUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
@@ -124,10 +123,9 @@ public class ANTLRv4PluginController implements Disposable {
 
 
     public void projectOpened() {
-        IdeaPluginDescriptor plugin = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
-        String version = "unknown";
-        if (plugin != null) {
-            version = plugin.getVersion();
+        String version = PluginDescriptorUtil.getPluginVersion(PluginId.getId(PLUGIN_ID));
+        if (version == null) {
+            version = "unknown";
         }
         LOG.info("ANTLR 4 Plugin version " + version + ", Java version " + SystemInfo.JAVA_VERSION);
         // make sure the tool windows are created early
@@ -240,7 +238,8 @@ public class ANTLRv4PluginController implements Disposable {
     }
 
     public void grammarFileSavedEvent(Project project, VirtualFile grammarFile) {
-        if (projectIsClosed || project.isDisposed()) {
+        Project target = project != null ? project : this.project;
+        if (projectIsClosed || target == null || target.isDisposed() || grammarFile == null) {
             return;
         }
 
@@ -253,9 +252,9 @@ public class ANTLRv4PluginController implements Disposable {
 
         grammarFileMods.put(grammarFilePath, modCount);
 
-        LOG.info("grammarFileSavedEvent " + grammarFilePath + " " + project.getName());
+        LOG.info("grammarFileSavedEvent " + grammarFilePath + " " + target.getName());
         // True disk/save path: may regenerate .tokens / run Autogen when enabled
-        updateGrammarObjectsFromFile(project, grammarFile, true, () -> {
+        updateGrammarObjectsFromFile(target, grammarFile, true, () -> {
             if (projectIsClosed || this.project.isDisposed()) {
                 return;
             }
@@ -265,7 +264,7 @@ public class ANTLRv4PluginController implements Disposable {
 
     /**
      * Reload interpreter grammars and refresh the preview UI only.
-     * Does not write {@code .tokens} or run ANTLR code generation — used by annotator-driven auto-refresh.
+     * Does not write {@code .tokens} or run ANTLR code generation; used by annotator-driven auto-refresh.
      */
     public void reloadGrammarForPreview(VirtualFile grammarFile) {
         if (projectIsClosed || project.isDisposed() || grammarFile == null) {
@@ -369,12 +368,16 @@ public class ANTLRv4PluginController implements Disposable {
     }
 
     /**
-     * Make sure to run after updating grammars in previewState
+     * Make sure to run after updating grammars in previewState.
+     * Uses stale-check (not force) so unchanged outputs are skipped.
      */
     public void runANTLRTool(final VirtualFile grammarFile) {
+        runANTLRTool(grammarFile, false);
+    }
+
+    public void runANTLRTool(final VirtualFile grammarFile, boolean forceGeneration) {
         String title = "ANTLR Code Generation";
         boolean canBeCancelled = true;
-        boolean forceGeneration = false;
         Task gen =
                 new RunANTLROnGrammarFile(grammarFile,
                         project,
@@ -404,21 +407,44 @@ public class ANTLRv4PluginController implements Disposable {
             // if grammarFileName is a separate lexer, reload every open parser that depends on it
             List<PreviewState> associated = getAssociatedParsersIfLexer(grammarFile.getPath());
             if (!associated.isEmpty()) {
+                Runnable finish = () -> {
+                    // #697: after lexer save, also autogen associated parsers (and lexer) when enabled
+                    if (generateTokensFile && !projectIsClosed && !project.isDisposed()) {
+                        ANTLRv4GrammarProperties lexerProps =
+                                ANTLRv4ToolGrammarPropertiesStore.getGrammarProperties(project, grammarFile);
+                        if (lexerProps != null && lexerProps.shouldAutoGenerateParser()) {
+                            runANTLRTool(grammarFile);
+                        }
+                        for (PreviewState s : associated) {
+                            if (s.grammarFile == null) {
+                                continue;
+                            }
+                            ANTLRv4GrammarProperties props =
+                                    ANTLRv4ToolGrammarPropertiesStore.getGrammarProperties(project, s.grammarFile);
+                            if (props != null && props.shouldAutoGenerateParser()) {
+                                runANTLRTool(s.grammarFile);
+                            }
+                        }
+                    }
+                    if (afterReload != null) {
+                        ApplicationManager.getApplication().invokeLater(afterReload, project.getDisposed());
+                    }
+                };
                 Runnable reloadAssociated = () -> {
                     if (projectIsClosed || project.isDisposed()) {
                         return;
                     }
                     AtomicInteger remaining = new AtomicInteger(associated.size());
                     Runnable oneDone = () -> {
-                        if (remaining.decrementAndGet() == 0 && afterReload != null) {
-                            ApplicationManager.getApplication().invokeLater(afterReload, project.getDisposed());
+                        if (remaining.decrementAndGet() == 0) {
+                            finish.run();
                         }
                     };
                     for (PreviewState s : associated) {
                         if (s.grammarFile != null) {
                             updateGrammarObjectsFromFile_(project, s.grammarFile, oneDone);
-                        } else if (remaining.decrementAndGet() == 0 && afterReload != null) {
-                            ApplicationManager.getApplication().invokeLater(afterReload, project.getDisposed());
+                        } else if (remaining.decrementAndGet() == 0) {
+                            finish.run();
                         }
                     }
                 };
@@ -448,7 +474,7 @@ public class ANTLRv4PluginController implements Disposable {
                 return;
             }
 
-            // Autogen for parser / combined grammars on save
+            // Autogen for parser / combined grammars on save (#697)
             if (generateTokensFile) {
                 ANTLRv4GrammarProperties props = ANTLRv4ToolGrammarPropertiesStore.getGrammarProperties(project, grammarFile);
                 if (props != null && props.shouldAutoGenerateParser()) {
@@ -478,6 +504,9 @@ public class ANTLRv4PluginController implements Disposable {
                             Grammar[] grammars = ParsingUtils.loadGrammars(grammarFile, project);
                             atomicReference.set(grammars);
                         }
+                    } catch (Throwable t) {
+                        // Never let Tool/runtime crashes escape the background loader
+                        LOG.warn("loadGrammars failed for " + grammarFile.getPath(), t);
                     } finally {
                         countDownLatch.countDown();
                     }
@@ -577,6 +606,24 @@ public class ANTLRv4PluginController implements Disposable {
 //        return new File(pathOne).equals(new File(pathTwo));
     }
 
+    /**
+     * #265: After project restore, a .g4 editor tab can appear open with an empty Document
+     * even though the VirtualFile has content. Reloading from disk recovers until re-open.
+     */
+    private void ensureGrammarDocumentLoaded(@NotNull VirtualFile file) {
+        if (!"g4".equalsIgnoreCase(file.getExtension()) || !file.isValid()) {
+            return;
+        }
+        Document doc = FileDocumentManager.getInstance().getDocument(file);
+        if (doc == null) {
+            return;
+        }
+        if (doc.getTextLength() == 0 && file.getLength() > 0 && !FileDocumentManager.getInstance().isDocumentUnsaved(doc)) {
+            LOG.info("Reloading empty restored grammar document from disk: " + file.getPath());
+            FileDocumentManager.getInstance().reloadFromDisk(doc);
+        }
+    }
+
     public void parseText(final VirtualFile grammarFile, String inputText) {
         if (projectIsClosed || project.isDisposed()) {
             return;
@@ -605,10 +652,17 @@ public class ANTLRv4PluginController implements Disposable {
                 (indicator) -> {
                     long start = System.nanoTime();
 
-                    ParsingResult result = ParsingUtils.parseText(
-                            g, lg, startRuleName,
-                            grammarFile, inputText, project
-                    );
+                    ParsingResult parsed;
+                    try {
+                        parsed = ParsingUtils.parseText(
+                                g, lg, startRuleName,
+                                grammarFile, inputText, project
+                        );
+                    } catch (Throwable t) {
+                        LOG.warn("parseText failed for " + grammarFile.getPath(), t);
+                        parsed = null;
+                    }
+                    final ParsingResult result = parsed;
                     return () -> {
                         // Only commit if this is still the latest requested parse
                         if (generation != parseGeneration.get() || indicator.isCanceled()
@@ -780,12 +834,21 @@ public class ANTLRv4PluginController implements Disposable {
             if (projectIsClosed || project.isDisposed() || ApplicationManager.getApplication().isUnitTestMode()) {
                 return;
             }
-            // VirtualFileListener is application-wide; only handle files in this project
-            if (!ProjectFileIndex.getInstance(project).isInContent(file)) {
+            // VirtualFileListener is application-wide; only handle files in this project.
+            // #697: isInContent is too strict (misses grammars outside marked content roots).
+            if (!isGrammarFileInProject(file)) {
                 return;
             }
             grammarFileSavedEvent(project, file);
         }
+    }
+
+    private boolean isGrammarFileInProject(@NotNull VirtualFile file) {
+        if (ProjectFileIndex.getInstance(project).isInContent(file)) {
+            return true;
+        }
+        String base = project.getBasePath();
+        return base != null && FileUtil.isAncestor(base, file.getPath(), false);
     }
 
     public class MyFileEditorManagerAdapter implements FileEditorManagerListener {
@@ -794,7 +857,16 @@ public class ANTLRv4PluginController implements Disposable {
             if (projectIsClosed || project.isDisposed()) {
                 return;
             }
-            currentEditorFileChangedEvent(project, null, file, false);
+            // #265: Do not touch grammars during synchronous editor restore — that can leave
+            // the grammar tab open but empty until the file is re-opened. Finish platform
+            // document/editor setup first, then reload an empty-but-nonempty-on-disk doc.
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (projectIsClosed || project.isDisposed() || !file.isValid()) {
+                    return;
+                }
+                ensureGrammarDocumentLoaded(file);
+                currentEditorFileChangedEvent(project, null, file, false);
+            }, project.getDisposed());
         }
 
         @Override
@@ -816,35 +888,23 @@ public class ANTLRv4PluginController implements Disposable {
                 }
 
                 if (modified) {
-                    new Task.Backgroundable(project, "Commit document") {
-                        @Override
-                        public void run(@NotNull ProgressIndicator progressIndicator) {
-                            ApplicationManager.getApplication().invokeLater(() -> {
-                                try {
-                                    if (getProject() == null || getProject().isDisposed()) return;
-                                    PsiDocumentManager psiMgr = PsiDocumentManager.getInstance(project);
-                                    FileDocumentManager docMgr = FileDocumentManager.getInstance();
-                                    if (event.getOldFile() != null && event.getOldFile().exists()) {
-                                        Document doc = docMgr.getDocument(event.getOldFile());
-                                        if (doc != null) {
-                                            if ((!psiMgr.isCommitted(doc) || docMgr.isDocumentUnsaved(doc))
-                                                    && !getProject().isDisposed()
-                                                    && !project.isDisposed()
-                                            ) {
-                                                psiMgr.commitDocument(doc);
-                                                docMgr.saveDocument(doc);
-                                            }
-                                        }
-                                    }
-                                } catch (Exception e) {
-                                    LOG.info("Commit document error", e);
-                                }
-
-                            });
+                    // #248/#259/#264: never saveDocument() on tab switch (EDT freeze / VFS assert).
+                    // Commit PSI asynchronously; preview reload uses in-memory document text.
+                    VirtualFile oldFile = event.getOldFile();
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        try {
+                            if (projectIsClosed || project.isDisposed() || oldFile == null || !oldFile.exists()) {
+                                return;
+                            }
+                            PsiDocumentManager psiMgr = PsiDocumentManager.getInstance(project);
+                            Document doc = FileDocumentManager.getInstance().getDocument(oldFile);
+                            if (doc != null && !psiMgr.isCommitted(doc) && !project.isDisposed()) {
+                                psiMgr.commitDocument(doc);
+                            }
+                        } catch (Throwable t) {
+                            LOG.info("Commit document error", t);
                         }
-                    }.queue();
-
-
+                    }, project.getDisposed());
                 }
                 currentEditorFileChangedEvent(ANTLRv4PluginController.this.project, event.getOldFile(), event.getNewFile(), modified);
             }

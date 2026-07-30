@@ -38,6 +38,10 @@ java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
 }
+
+tasks.withType<JavaCompile>().configureEach {
+    options.encoding = "UTF-8"
+}
 // Java 17 is required for IntelliJ Platform 2022.2+
 kotlin {
     jvmToolchain(17)
@@ -51,6 +55,8 @@ dependencies {
     antlr("org.antlr:antlr4:4.13.2") { // use ANTLR version 4
         exclude("com.ibm.icu", "icu4j")
     }
+    // Explicit (#203): ensure v3 runtime is always packaged — Tool/annotator need org.antlr.runtime.*
+    implementation("org.antlr:antlr-runtime:3.5.3")
     implementation (libs.antlr4IntellijAdaptor)
     testImplementation(libs.junit)
     testImplementation (libs.mockito)

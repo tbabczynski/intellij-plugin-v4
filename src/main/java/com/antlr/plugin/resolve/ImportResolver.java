@@ -58,11 +58,16 @@ public class ImportResolver {
         return resolveInImportedFiles(grammarFile, ruleName, new ArrayList<>());
     }
 
-    private static PsiElement resolveInImportedFiles(PsiFile grammarFile, String ruleName, List<PsiFile> visitedFiles) {
+    /** Directly imported grammar files (one level), for completion variants. */
+    @NotNull
+    public static List<PsiFile> collectImportedFiles(@NotNull PsiFile grammarFile) {
         DelegateGrammarsVisitor visitor = new DelegateGrammarsVisitor();
         grammarFile.accept(visitor);
+        return new ArrayList<>(visitor.importedGrammars);
+    }
 
-        for (PsiFile importedGrammar : visitor.importedGrammars) {
+    private static PsiElement resolveInImportedFiles(PsiFile grammarFile, String ruleName, List<PsiFile> visitedFiles) {
+        for (PsiFile importedGrammar : collectImportedFiles(grammarFile)) {
             if (visitedFiles.contains(importedGrammar)) {
                 continue;
             }

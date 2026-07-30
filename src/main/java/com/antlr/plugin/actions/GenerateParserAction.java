@@ -81,7 +81,7 @@ public class GenerateParserAction extends AnAction implements DumbAware {
         if (gen.hadErrors()) {
             notification = new Notification(RunANTLROnGrammarFile.groupDisplayId,
                     "Failed to generate parser for " + grammarFile.getName(),
-                    "See ANTLR Tool Console for details",
+                    "See ANTLR Console for details",
                     NotificationType.ERROR);
         } else {
             notification = new Notification(RunANTLROnGrammarFile.groupDisplayId,

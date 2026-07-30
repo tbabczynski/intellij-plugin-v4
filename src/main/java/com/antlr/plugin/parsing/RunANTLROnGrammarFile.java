@@ -2,6 +2,7 @@ package com.antlr.plugin.parsing;
 
 import com.antlr.plugin.ANTLRv4PluginController;
 import com.antlr.plugin.ANTLRv4TokenTypes;
+import com.antlr.plugin.PluginIgnoreMissingTokensFileErrorManager;
 import com.antlr.plugin.configdialogs.ANTLRv4GrammarProperties;
 import com.antlr.plugin.parser.ANTLRv4Parser;
 import com.antlr.plugin.preview.PreviewState;
@@ -112,18 +113,62 @@ public class RunANTLROnGrammarFile extends Task.Modal {
             return;
         }
         String language = g.getOptionString(ANTLRv4GrammarProperties.PROP_LANGUAGE);
-        Tool tool = ParsingUtils.createANTLRToolForLoadingGrammars(
-                getGrammarProperties(project, grammarFile), project, grammarFile);
+        if (language == null || language.isBlank()) {
+            language = "Java";
+        }
+        ANTLRv4GrammarProperties props = getGrammarProperties(project, grammarFile);
+        VirtualFile contentRoot = getContentRoot(project, grammarFile);
+        Map<String, String> argMap = getANTLRArgs(project, grammarFile);
+        String package_ = argMap.get("-package");
+        if (package_ == null && props != null) {
+            package_ = props.getPackage();
+        }
+        String outputDirName = props != null
+                ? props.resolveOutputDirName(project, contentRoot, package_)
+                : OUTPUT_DIR_NAME;
+        //noinspection ResultOfMethodCallIgnored
+        new File(outputDirName).mkdirs();
+
+        // Construct Tool with -o so haveOutputDir is set (field is protected)
+        String libDir = props != null
+                ? props.resolveLibDir(project, getParentDir(grammarFile))
+                : getParentDir(grammarFile);
+        Tool tool = new Tool(new String[]{"-o", outputDirName, "-lib", libDir});
+        tool.errMgr = new PluginIgnoreMissingTokensFileErrorManager(tool);
+        tool.errMgr.setFormat("antlr");
+        tool.removeListeners();
+        // Target.genFile uses Grammar.tool for the output directory; force absolute -o there too.
+        if (g.tool != null) {
+            g.tool.outputDirectory = outputDirName;
+            setHaveOutputDir(g.tool);
+        }
+        setHaveOutputDir(tool);
         CodeGenerator gen = CodeGenerator.create(tool, g, language);
         if (gen != null) {
             gen.writeVocabFile();
         }
     }
 
+    /** {@code Tool.haveOutputDir} is protected; -o constructor sets it, but Grammar.tool may be a bare Tool. */
+    private static void setHaveOutputDir(Tool tool) {
+        try {
+            var field = Tool.class.getDeclaredField("haveOutputDir");
+            field.setAccessible(true);
+            field.setBoolean(tool, true);
+        } catch (ReflectiveOperationException ignored) {
+            // Best-effort; Tool constructed with -o already has the flag set.
+        }
+    }
+
     // TODO: lots of duplication with antlr() function.
     private boolean isGrammarStale(ANTLRv4GrammarProperties grammarProperties) {
+        // #722: VFS events can fire for files without a parent (e.g. git-index virtual files)
+        String parentDir = getParentDir(grammarFile);
+        if (parentDir == null) {
+            return false;
+        }
         // Grammar file path is always next to the .g4 file; libDir is for imports/tokenVocab only
-        String fullyQualifiedInputFileName = getParentDir(grammarFile) + File.separator + grammarFile.getName();
+        String fullyQualifiedInputFileName = parentDir + File.separator + grammarFile.getName();
 
         ANTLRv4PluginController controller = ANTLRv4PluginController.getInstance(project);
         if (controller == null) {
@@ -153,8 +198,51 @@ public class RunANTLROnGrammarFile extends Task.Modal {
         File inF = new File(fullyQualifiedInputFileName);
         File outF = new File(fullyQualifiedOutputFileName);
         boolean stale = !outF.exists() || inF.lastModified() > outF.lastModified();
+        if (!stale) {
+            // Imports / tokenVocab / companion lexer can change without touching the main .g4 mtime
+            stale = hasNewerDependency(g, outF.lastModified(), grammarProperties);
+        }
         LOG.info((!stale ? "not" : "") + "stale: " + fullyQualifiedInputFileName + " -> " + fullyQualifiedOutputFileName);
         return stale;
+    }
+
+    private boolean hasNewerDependency(Grammar g, long outLastModified,
+                                       ANTLRv4GrammarProperties grammarProperties) {
+        if (g.importedGrammars != null) {
+            for (Grammar imported : g.importedGrammars) {
+                if (imported == null || imported.fileName == null) {
+                    continue;
+                }
+                File dep = new File(imported.fileName);
+                if (dep.isFile() && dep.lastModified() > outLastModified) {
+                    return true;
+                }
+            }
+        }
+
+        String tokenVocab = g.getOptionString("tokenVocab");
+        if (tokenVocab != null && !tokenVocab.isBlank()) {
+            String sourcePath = getParentDir(grammarFile);
+            String libDir = grammarProperties.resolveLibDir(project, sourcePath);
+            File vocab = new File(tokenVocab.endsWith(".g4") ? tokenVocab : tokenVocab + ".g4");
+            if (!vocab.isAbsolute()) {
+                File beside = new File(sourcePath, vocab.getPath());
+                File inLib = libDir != null ? new File(libDir, vocab.getPath()) : null;
+                if (beside.isFile() && beside.lastModified() > outLastModified) {
+                    return true;
+                }
+                if (inLib != null && inLib.isFile() && inLib.lastModified() > outLastModified) {
+                    return true;
+                }
+            } else if (vocab.isFile() && vocab.lastModified() > outLastModified) {
+                return true;
+            }
+        }
+
+        String companionLexer = ParsingUtils.getLexerNameFromParserFileName(
+                getParentDir(grammarFile) + File.separator + grammarFile.getName());
+        File lexerFile = new File(companionLexer);
+        return lexerFile.isFile() && lexerFile.lastModified() > outLastModified;
     }
 
     /**
@@ -179,18 +267,36 @@ public class RunANTLROnGrammarFile extends Task.Modal {
 
         LOG.info("args: " + Utils.join(args.iterator(), " "));
 
-        Tool antlr = new Tool(args.toArray(new String[0]));
-
         String timeStamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(Calendar.getInstance().getTime());
-
         ConsoleUtils.consolePrint(project, timeStamp + ": antlr4 " + Misc.join(args.iterator(), " ") + "\n", ConsoleViewContentType.SYSTEM_OUTPUT);
+
+        // Tool(args) runs handleArgs() in the constructor. Errors like DIR_NOT_FOUND for -lib
+        // are emitted via DefaultToolListener (stderr) while listeners is still empty — before we
+        // can attach RunANTLRListener. Capture errMgr count so we don't report a false success.
+        Tool antlr = new Tool(args.toArray(new String[0]));
+        int errorsFromArgs = antlr.getNumErrors();
+
         antlr.removeListeners();
         RunANTLRListener listener = new RunANTLRListener(antlr, project);
         antlr.addListener(listener);
+        if (errorsFromArgs > 0) {
+            listener.hasErrors = true;
+            listener.hasOutput = true;
+            // Original messages went to stderr; surface them in ANTLR Console for the user.
+            ConsoleUtils.consolePrint(project,
+                    "error: " + errorsFromArgs + " problem(s) in ANTLR options "
+                            + "(often invalid -lib / -o directory). Check Configure ANTLR paths.\n",
+                    ConsoleViewContentType.ERROR_OUTPUT);
+            // After DIR_NOT_FOUND, Tool silently falls back libDirectory to "."; do not continue
+            // and pretend generation succeeded with a wrong lib root.
+            hadErrors = true;
+            ANTLRv4PluginController.showLaterConsoleWindow(project);
+            return;
+        }
 
         try {
             antlr.processGrammarsOnCommandLine();
-            hadErrors = listener.hasErrors;
+            hadErrors = listener.hasErrors || antlr.getNumErrors() > 0;
         } catch (Throwable e) {
             StringWriter sw = new StringWriter();
             PrintWriter pw = new PrintWriter(sw);
@@ -207,7 +313,7 @@ public class RunANTLROnGrammarFile extends Task.Modal {
             hadErrors = true;
         }
 
-        if (listener.hasOutput) {
+        if (listener.hasOutput || hadErrors) {
             ANTLRv4PluginController.showLaterConsoleWindow(project);
         }
     }
@@ -267,6 +373,10 @@ public class RunANTLROnGrammarFile extends Task.Modal {
         }
 
         String encoding = grammarProperties != null ? grammarProperties.getEncoding() : null;
+        // #395: fall back to VirtualFile charset / platform default when unset
+        if (isBlank(encoding) && vfile != null) {
+            encoding = vfile.getCharset() != null ? vfile.getCharset().name() : null;
+        }
         if (isNotBlank(encoding)) {
             args.put("-encoding", encoding);
         }

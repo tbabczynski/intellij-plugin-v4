@@ -12,6 +12,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Caret;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.editor.SelectionModel;
 import com.intellij.openapi.editor.event.CaretEvent;
 import com.intellij.openapi.editor.event.CaretListener;
@@ -73,12 +74,14 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
     private boolean autoRefresh = true;
 
     private boolean scrollFromSource = false;
-    private boolean highlightSource = false;
+    /** When true, selecting a Hierarchy / Parse-tree node highlights the matching input span. */
+    private boolean highlightSource = true;
     private boolean buildTree = true;
     private boolean buildHierarchy = true;
 
     private ActionToolbar buttonBar;
     private final CancelParserAction cancelParserAction = new CancelParserAction();
+    private JLabel interpreterLimitationBanner;
 
     /**
      * Used to avoid reparsing and also updating the parse tree upon each keystroke.
@@ -135,6 +138,14 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
     private void createGUI() {
         this.setLayout(new BorderLayout());
 
+        // #523/#732: warn that the Preview interpreter does not run actions/predicates
+        interpreterLimitationBanner = new JLabel(
+                "Preview does not execute embedded actions or semantic predicates; results may differ from generated code.");
+        interpreterLimitationBanner.setForeground(JBColor.ORANGE);
+        interpreterLimitationBanner.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+        interpreterLimitationBanner.setVisible(false);
+        this.add(interpreterLimitationBanner, BorderLayout.NORTH);
+
         // Had to set min size / preferred size in InputPanel.form to get slider to allow left shift of divider
         Splitter splitPane = new Splitter();
         inputPanel = getEditorPanel();
@@ -144,7 +155,11 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
                 Caret caret = event.getCaret();
 
                 if (scrollFromSource && caret != null) {
-                    hierarchyViewer.selectNodeAtOffset(caret.getOffset());
+                    int offset = caret.getOffset();
+                    hierarchyViewer.selectNodeAtOffset(offset);
+                    if (treeViewer != null) {
+                        treeViewer.selectNodeAtOffset(offset);
+                    }
                 }
             }
         });
@@ -228,6 +243,11 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
             @Override
             public void setSelected(@NotNull AnActionEvent e, boolean state) {
                 buildTree = state;
+                if (!state) {
+                    treeViewer.setTree(null);
+                } else {
+                    rebuildViewsFromCurrentParse();
+                }
             }
         };
         ToggleAction autoBuildHier = new ToggleAction("Build Hierarchy After Parse", null, AllIcons.Actions.ShowAsTree) {
@@ -244,6 +264,11 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
             @Override
             public void setSelected(@NotNull AnActionEvent e, boolean state) {
                 buildHierarchy = state;
+                if (!state) {
+                    hierarchyViewer.setTree(null);
+                } else {
+                    rebuildViewsFromCurrentParse();
+                }
             }
         };
 
@@ -297,7 +322,9 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
                     Tree node = treeViewer.getTreeAt(e.getPoint());
                     if (node != null) {
                         treeViewer.setSelectedNode(node);
-                        onParserRuleSelected(node);
+                        if (highlightSource) {
+                            onParserRuleSelected(node);
+                        }
                     }
                 }
             }
@@ -348,9 +375,10 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
         autoSetStartRule(previewState);
         ensureStartRuleExists(previewGrammar);
         inputPanel.grammarFileSaved();
+        updateInterpreterLimitationBanner(previewState);
 
-        // if the preview grammar is not a pure lexer and there is a start rule, reparse
-        if (previewState.g != null && previewState.startRuleName != null) {
+        // Parser with start rule, or pure lexer (startRuleName set to "Tokens")
+        if (previewState.startRuleName != null && previewState.lg != null) {
             updateParseTreeFromDoc(previewGrammar);
         } else {
             clearTabs(null); // blank tree
@@ -398,6 +426,7 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
         autoSetStartRule(previewState);
         inputPanel.switchToGrammar(previewState, grammarFile);
         profilerPanel.switchToGrammar(previewState);
+        updateInterpreterLimitationBanner(previewState);
 
         if (previewState.startRuleName != null) {
             updateParseTreeFromDoc(grammarFile); // regens tree and profile data
@@ -409,15 +438,30 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
         setEnabled(previewState.g != null || previewState.lg != null);
     }
 
+    private void updateInterpreterLimitationBanner(@Nullable PreviewState previewState) {
+        if (interpreterLimitationBanner == null) {
+            return;
+        }
+        boolean show = previewState != null && (
+                ParsingUtils.grammarHasActionsOrPredicates(previewState.g)
+                        || ParsingUtils.grammarHasActionsOrPredicates(previewState.lg));
+        interpreterLimitationBanner.setVisible(show);
+    }
+
     /**
      * From 1.18, automatically set the start rule name to the first rule in the grammar
      * if none has been specified
      */
     protected void autoSetStartRule(PreviewState previewState) {
         if (previewState.g == null || previewState.g.rules.isEmpty()) {
-            // If there is no grammar all of a sudden, we need to unset the previous rule name
-            previewState.startRuleName = null;
-        } else if (previewState.startRuleName == null) {
+            // Pure lexer: no parser start rule; use a sentinel so preview can tokenize
+            if (previewState.lg != null && previewState.lg != ParsingUtils.BAD_LEXER_GRAMMAR) {
+                previewState.startRuleName = "Tokens";
+            } else {
+                previewState.startRuleName = null;
+            }
+        } else if (previewState.startRuleName == null
+                || "Tokens".equals(previewState.startRuleName)) {
             OrderedHashMap<String, Rule> rules = previewState.g.rules;
             previewState.startRuleName = rules.getElement(0).name;
         }
@@ -465,7 +509,16 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
             treeViewer.setTree(tree);
             hierarchyViewer.setTree(null);
             hierarchyViewer.setRuleNames(Collections.emptyList());
-        });
+        }, project.getDisposed());
+    }
+
+    /** Rebuild Parse tree / Hierarchy from the latest parsing result when a build toggle is turned on. */
+    private void rebuildViewsFromCurrentParse() {
+        if (inputPanel == null || inputPanel.previewState == null
+                || inputPanel.previewState.parsingResult == null) {
+            return;
+        }
+        updateTreeViewer(inputPanel.previewState, inputPanel.previewState.parsingResult);
     }
 
     private void updateTreeViewer(final PreviewState preview, final ParsingResult result) {
@@ -479,7 +532,17 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
                 hierarchyViewer.setTreeTextProvider(provider);
                 hierarchyViewer.setTree(result.tree);
             }
-        } else {
+        } else if (result.parser == null && preview.lg != null) {
+            LexerTokenTreeTextProvider provider = new LexerTokenTreeTextProvider(preview.lg);
+            if (buildTree) {
+                treeViewer.setTreeTextProvider(provider);
+                treeViewer.setTree(result.tree);
+            }
+            if (buildHierarchy) {
+                hierarchyViewer.setTreeTextProvider(provider);
+                hierarchyViewer.setTree(result.tree);
+            }
+        } else if (preview.g != null) {
             if (buildTree) {
                 treeViewer.setRuleNames(Arrays.asList(preview.g.getRuleNames()));
                 treeViewer.setTree(result.tree);
@@ -513,7 +576,14 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
         if (controller == null) return;
         PreviewState previewState = controller.getPreviewState(grammarFile);
         LOG.info("updateParseTreeFromDoc " + grammarFile + " rule " + previewState.startRuleName);
-        if (previewState.g == null || previewState.lg == null) {
+        boolean lexerOnly = previewState.g == null
+                && previewState.lg != null
+                && previewState.lg != ParsingUtils.BAD_LEXER_GRAMMAR;
+        boolean parserReady = previewState.g != null
+                && previewState.g != ParsingUtils.BAD_PARSER_GRAMMAR
+                && previewState.lg != null
+                && previewState.lg != ParsingUtils.BAD_LEXER_GRAMMAR;
+        if (!lexerOnly && !parserReady) {
             // likely error in grammar prevents it from loading properly into previewState; bail
             indicateInvalidGrammarInParseTreePane();
             return;
@@ -609,6 +679,9 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
 
     @Override
     public void onParserRuleSelected(Tree tree) {
+        if (!highlightSource) {
+            return;
+        }
         int startIndex;
         int stopIndex;
 
@@ -637,10 +710,19 @@ public class PreviewPanel extends JPanel implements ParsingResultSelectionListen
         if (editor == null || editor.isDisposed()) {
             return;
         }
-        if (startIndex >= 0 && stopIndex + 1 <= editor.getDocument().getTextLength()) {
-            SelectionModel selectionModel = editor.getSelectionModel();
-            selectionModel.removeSelection();
-            selectionModel.setSelection(startIndex, stopIndex + 1);
+        int docLen = editor.getDocument().getTextLength();
+        if (startIndex < 0 || stopIndex < startIndex || docLen == 0) {
+            return;
         }
+        int endExclusive = Math.min(stopIndex + 1, docLen);
+        int start = Math.min(startIndex, endExclusive);
+        if (start >= endExclusive) {
+            return;
+        }
+        SelectionModel selectionModel = editor.getSelectionModel();
+        selectionModel.removeSelection();
+        selectionModel.setSelection(start, endExclusive);
+        editor.getCaretModel().moveToOffset(start);
+        editor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
     }
 }

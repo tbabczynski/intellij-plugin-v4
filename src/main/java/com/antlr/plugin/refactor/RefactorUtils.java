@@ -1,6 +1,5 @@
 package com.antlr.plugin.refactor;
 
-import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
@@ -136,34 +135,34 @@ public class RefactorUtils {
     public static void replaceText(final Project project, final Document doc,
                                    final int start, final int stop, // inclusive
                                    final String text) {
-        WriteCommandAction setTextAction = new WriteCommandAction(project) {
-            @Override
-            protected void run(final Result result) {
-                doc.replaceString(start, stop + 1, text);
-            }
-        };
-        setTextAction.execute();
+        // #741: WriteCommandAction is final on IJ 2026.2+
+        WriteCommandAction.runWriteCommandAction(project, () ->
+                doc.replaceString(start, stop + 1, text));
     }
 
     public static void insertText(final Project project, final Document doc,
                                   final int where,
                                   final String text) {
-        WriteCommandAction setTextAction = new WriteCommandAction(project) {
-            @Override
-            protected void run(final Result result) {
-                doc.insertString(where, text);
-            }
-        };
-        setTextAction.execute();
+        WriteCommandAction.runWriteCommandAction(project, () ->
+                doc.insertString(where, text));
     }
 
     /** Get start/stop of an entire rule including semi and then clean up
      *  WS at end.
      */
     public static String getRuleText(CommonTokenStream tokens, ParserRuleContext ruleDefNode) {
+        if (tokens == null || ruleDefNode == null) {
+            return "";
+        }
         Token stop = ruleDefNode.getStop();
         TerminalNode colonNode = ruleDefNode.getToken(ANTLRv4Parser.COLON, 0);
+        if (stop == null || colonNode == null) {
+            return "";
+        }
         Token colon = colonNode.getSymbol();
+        if (colon == null || stop.getTokenIndex() <= 0 || colon.getTokenIndex() + 1 >= tokens.size()) {
+            return "";
+        }
         Token beforeSemi = tokens.get(stop.getTokenIndex() - 1);
         Token afterColon = tokens.get(colon.getTokenIndex() + 1);
 

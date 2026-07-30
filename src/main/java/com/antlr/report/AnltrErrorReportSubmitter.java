@@ -10,6 +10,7 @@ import com.intellij.ide.BrowserUtil;
 import com.intellij.ide.DataManager;
 import com.intellij.idea.IdeaLogger;
 import com.intellij.notification.NotificationType;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
@@ -140,11 +141,15 @@ public class AnltrErrorReportSubmitter extends ErrorReportSubmitter {
                 java.util.List<AnAction> anActions = new ArrayList<>();
                 anActions.add(new AnAction("View") {
                     @Override
+                    public @NotNull ActionUpdateThread getActionUpdateThread() {
+                        return ActionUpdateThread.BGT;
+                    }
+
+                    @Override
                     public void actionPerformed(@NotNull AnActionEvent e) {
                         if (StringUtils.isNotBlank(finalSubmittedReportInfo.getURL())) {
                             BrowserUtil.browse(finalSubmittedReportInfo.getURL());
                         }
-
                     }
                 });
                 StringBuilder text = new StringBuilder();

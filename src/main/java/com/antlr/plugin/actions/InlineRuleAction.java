@@ -1,7 +1,6 @@
 package com.antlr.plugin.actions;
 
 import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -80,14 +79,10 @@ public class InlineRuleAction extends AnAction {
         final String ruleText = ruleText_; // we ref from inner class; requires final
 
         // replace rule refs with rule text
-        WriteCommandAction setTextAction = new WriteCommandAction(project) {
-            @Override
-            protected void run(final Result result) {
+        // #741: WriteCommandAction is final on IJ 2026.2+
+        WriteCommandAction.runWriteCommandAction(project, () ->
                 // do in a single action so undo works in one go
-                replaceRuleRefs(doc, tokens, ruleName, rrefNodes, ruleText);
-            }
-        };
-        setTextAction.execute();
+                replaceRuleRefs(doc, tokens, ruleName, rrefNodes, ruleText));
     }
 
     public void replaceRuleRefs(Document doc, CommonTokenStream tokens,
@@ -114,6 +109,9 @@ public class InlineRuleAction extends AnAction {
         // reparse to find new rule location
         String grammarText = doc.getText();
         ParsingResult results = ParsingUtils.parseANTLRGrammar(grammarText);
+        if (results == null || results.parser == null || results.tree == null) {
+            return;
+        }
         Parser parser = results.parser;
         ParseTree tree = results.tree;
         tokens = (CommonTokenStream) parser.getTokenStream();

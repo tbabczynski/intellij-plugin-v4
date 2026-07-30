@@ -4,8 +4,12 @@ import com.intellij.lang.BracePair;
 import com.intellij.lang.PairedBraceMatcher;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.tree.IElementType;
+import org.antlr.intellij.adaptor.lexer.TokenIElementType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static com.antlr.plugin.ANTLRv4TokenTypes.getTokenElementType;
 import static com.antlr.plugin.parser.ANTLRv4Lexer.*;
@@ -16,13 +20,22 @@ public class ANTLRv4BraceMatcher implements PairedBraceMatcher {
     @NotNull
     @Override
     public BracePair[] getPairs() {
-        return new BracePair[]{
-                new BracePair(getTokenElementType(LPAREN), getTokenElementType(RPAREN), false),
-                new BracePair(getTokenElementType(LBRACE), getTokenElementType(RBRACE), true),
-                new BracePair(getTokenElementType(BEGIN_ACTION), getTokenElementType(END_ACTION), false),
-                new BracePair(getTokenElementType(BEGIN_ARGUMENT), getTokenElementType(END_ARGUMENT), false),
-                new BracePair(getTokenElementType(LT), getTokenElementType(GT), false),
-        };
+        // #207/#253: TOKEN_ELEMENT_TYPES may be empty during early class-init / rainbow-brackets
+        List<BracePair> pairs = new ArrayList<>(5);
+        addPair(pairs, LPAREN, RPAREN, false);
+        addPair(pairs, LBRACE, RBRACE, true);
+        addPair(pairs, BEGIN_ACTION, END_ACTION, false);
+        addPair(pairs, BEGIN_ARGUMENT, END_ARGUMENT, false);
+        addPair(pairs, LT, GT, false);
+        return pairs.toArray(BracePair[]::new);
+    }
+
+    private static void addPair(List<BracePair> pairs, int left, int right, boolean structural) {
+        TokenIElementType l = getTokenElementType(left);
+        TokenIElementType r = getTokenElementType(right);
+        if (l != null && r != null) {
+            pairs.add(new BracePair(l, r, structural));
+        }
     }
 
     @Override

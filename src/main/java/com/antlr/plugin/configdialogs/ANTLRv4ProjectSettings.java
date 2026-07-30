@@ -1,6 +1,7 @@
 package com.antlr.plugin.configdialogs;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
@@ -68,8 +69,8 @@ public class ANTLRv4ProjectSettings implements SearchableConfigurable, Disposabl
     }
 
     @Override
-    public void apply() {
-        configurationForm.saveValues(project, ANTLRv4GrammarProperties.PROJECT_SETTINGS_PREFIX);
+    public void apply() throws ConfigurationException {
+        configurationForm.applyValidated(project, ANTLRv4GrammarProperties.PROJECT_SETTINGS_PREFIX);
     }
 
     public void reset() {

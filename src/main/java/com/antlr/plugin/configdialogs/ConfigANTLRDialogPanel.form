@@ -98,7 +98,7 @@
           <grid row="5" column="0" row-span="1" col-span="1" vsize-policy="0" hsize-policy="0" anchor="8" fill="0" indent="1" use-parent-layout="false"/>
         </constraints>
         <properties>
-          <text value="Language (e.g., Java, Python2, CSharp, ...)"/>
+          <text value="Language (e.g., Java, Python3, CSharp, ...)"/>
         </properties>
       </component>
       <component id="6c6d2" class="javax.swing.JTextField" binding="languageField">

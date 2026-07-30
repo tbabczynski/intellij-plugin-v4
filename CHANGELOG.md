@@ -1,16 +1,52 @@
 <!-- Keep a Changelog guide -> https://keepachangelog.com -->
 
-# ANTLR v4(New) Changelog
+# ANTLR v4 Grammar Changelog
 
 ## [Unreleased]
 
 
-##[2026.2.0]
+## [2026.2.0]
 ### Changed
+- Configure dialog language hint uses `Python3` (Python2 unsupported since ANTLR 4.13.2)
+- Resolve plugin version/enablement via reflection (`PluginDescriptorUtil`) instead of internal `PluginManagerCore.getPlugin` (IJ 2026.2+)
+- Rename plugin display name to **ANTLR v4 Grammar** (plugin id `com.my.antlr.tool` unchanged); tool windows `ANTLR Preview` / `ANTLR Console`
 - Replace ANTLR `TreeViewer` / vendored Batik with custom Swing `ParseTreeGraphView` for Parse tree preview (PNG + lightweight SVG export)
 - Clicking a Parse tree node highlights the matching span in the preview input (same as Hierarchy)
+- Pure lexer grammars can preview a synthetic Tokens tree (tokenize-only path)
+- Scroll from Source also selects/scrolls the Parse tree canvas; toggling Build Tree/Hierarchy off clears that view
 
 ### Fixed
+- Per-grammar Configure settings: exact `fileName` match updates in place (no duplicate rows); load keeps the first row if XML was dirty
+- Preview: `SafeLexerInterpreter` tolerates empty-stack `popMode` instead of crashing IDE (#163/#164/#181–#184/#209–#211); last-resort catch around preview parse
+- Annotator/Tool failures log as warn (not `LOG.error`) so bad grammars stop filing false plugin crash reports (#247); harden load/parse background tasks; keep `antlr-runtime` explicit (#203); tab-switch never `saveDocument` (#248/#264)
+- Fork crash reports: soft-fail ANTLR `process`/`importVocab` (#177/#204/#215/#247); clamp preview highlight offsets (#214); Registry-safe parse-tree export (#251); disposed-safe grammar props (#137); null-safe brace matcher / TokenTypes init (#207/#253); clearer coexistence with the official ANTLR plugin (#223)
+- Share Configure ANTLR settings between companion `XParser.g4` / `XLexer.g4` (upstream #548)
+- Guard `isGrammarStale` when grammar has no parent VFS path (upstream #722)
+- Hierarchy empty preview uses a placeholder root instead of null model (upstream #494)
+- Null-safe Inline Rule reparse; error-report View action uses `ActionUpdateThread.BGT`
+- Defer grammar load after editor restore and reload empty-but-nonempty-on-disk `.g4` documents (#265)
+- Stop subclassing `WriteCommandAction` (final in IJ 2026.2; upstream #741)
+- Option names (`tokenVocab`, `language`, …) are not rule references (upstream #653)
+- Expand Hierarchy ancestors when selecting from preview input click (upstream #726)
+- Persist grammar config keys/paths with `$PROJECT_DIR$` macros; migrate from `misc.xml` (upstream #420/#568)
+- Autogen-on-save: include project-base grammars and associated parsers after lexer save (upstream #697)
+- Preview banner when grammar has actions/predicates (upstream #523/#732)
+- Gate annotator preview refresh on document modification stamp (upstream #702)
+- Profiler opens the owning grammar file for imported decisions (upstream #372)
+- Suppress spurious preview `extraneous input '<EOF>'` errors (upstream #324)
+- Encoding falls back to file/platform charset when unset (upstream #395)
+- Test Rule forces interactive Input mode (upstream #644)
+- Load companion/`tokenVocab` lexer via configured `-lib` and relative paths (same as PSI resolve)
+- Completion variants include rules from `import` / `tokenVocab` grammars
+- Use SVG icons that ship with the plugin (PNG paths were missing)
+- Guard Profiler decision index and division-by-zero in stats; Ctrl/Alt-click preview before parse completes
+- Guard Lookahead ambig dialog index; null-safe Inline/Uniquify rule text extraction
+- Resolve `tokenVocab` / `import` via configured `-lib` and relative paths; treat import/tokenVocab/companion lexer as autogen stale deps
+- Wire Highlight Source toggle; dispose-safe Preview `clearTabs`; null-safe Hierarchy selection / folding brace nodes
+- Write lexer `.tokens` to the configured `-o` dir (set Tool `-o` / `haveOutputDir`); null-safe `grammarFileSavedEvent(project)`
+- Compile Java sources as UTF-8; stabilize GrammarElementRef / Issue540 / CreateRuleFix tests
+- Fix Profiler token-index -1 crash (#260); Ctrl-hover NPE when `g` is null (#261); parse-tree ruleIndex OOB (#262)
+- Avoid saving documents on editor tab switch (EDT freeze #259); bound grammar parse await; harden profiler/input highlighters
 - Fix listener lifecycle leaks (MessageBus / project close / multi-project VFS filtering)
 - Fix external annotator severity fall-through and reduce EDT/read-lock pressure
 - Fix bare `-o`/`-lib` ANTLR CLI args and restore autogen-on-save for parser grammars

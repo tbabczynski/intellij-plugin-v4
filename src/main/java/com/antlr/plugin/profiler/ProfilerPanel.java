@@ -29,6 +29,7 @@ import org.antlr.v4.runtime.misc.Interval;
 import org.antlr.v4.tool.Grammar;
 import org.antlr.v4.tool.Rule;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
@@ -220,19 +221,35 @@ public class ProfilerPanel {
 
     public void setProfilerData(PreviewState previewState, long parseTime_ns) {
         this.previewState = previewState;
+        if (previewState == null || previewState.parsingResult == null
+                || previewState.parsingResult.parser == null) {
+            // Lexer-only preview has no parser profile data
+            return;
+        }
         Parser parser = previewState.parsingResult.parser;
         ParseInfo parseInfo = parser.getParseInfo();
+        if (parseInfo == null) {
+            return;
+        }
         updateTableModelPerExpertCheckBox(parseInfo, parser);
         double parseTimeMS = parseTime_ns / (1000.0 * 1000.0);
         // microsecond decimal precision
         NumberFormat formatter = new DecimalFormat("#.###");
         parseTimeField.setText(formatter.format(parseTimeMS));
         double predTimeMS = parseInfo.getTotalTimeInPrediction() / (1000.0 * 1000.0);
+        double predPct = parseTimeMS > 0 ? 100 * predTimeMS / parseTimeMS : 0;
         predictionTimeField.setText(
-                String.format("%s = %3.2f%%", formatter.format(predTimeMS), 100 * (predTimeMS) / parseTimeMS)
+                String.format("%s = %3.2f%%", formatter.format(predTimeMS), predPct)
         );
         TokenStream tokens = parser.getInputStream();
         int numTokens = tokens.size();
+        if (numTokens <= 0) {
+            inputSizeField.setText("0 char, 0 lines");
+            numTokensField.setText("0");
+            lookaheadBurdenField.setText("0/0 = 0.00");
+            cacheMissRateField.setText("0/0 = 0.00%");
+            return;
+        }
         Token lastToken = tokens.get(numTokens - 1);
         int numChar = lastToken.getStopIndex();
         int numLines = lastToken.getLine();
@@ -251,12 +268,14 @@ public class ProfilerPanel {
         double look =
                 parseInfo.getTotalSLLLookaheadOps() +
                         parseInfo.getTotalLLLookaheadOps();
+        double lookPerToken = numTokens > 0 ? look / numTokens : 0;
         lookaheadBurdenField.setText(
-                String.format("%d/%d = %3.2f", (long) look, numTokens, look / numTokens)
+                String.format("%d/%d = %3.2f", (long) look, numTokens, lookPerToken)
         );
         double atnLook = parseInfo.getTotalATNLookaheadOps();
+        double cacheMissPct = look > 0 ? atnLook * 100.0 / look : 0;
         cacheMissRateField.setText(
-                String.format("%d/%d = %3.2f%%", (long) atnLook, (long) look, atnLook * 100.0 / look)
+                String.format("%d/%d = %3.2f%%", (long) atnLook, (long) look, cacheMissPct)
         );
     }
 
@@ -274,53 +293,94 @@ public class ProfilerPanel {
     public void selectDecisionInGrammar(PreviewState previewState, int decision) {
         final ANTLRv4PluginController controller = ANTLRv4PluginController.getInstance(previewState.project);
         if (controller == null) return;
-        final Editor grammarEditor = controller.getEditor(previewState.grammarFile);
-        if (grammarEditor == null) return;
 
+        if (previewState.g == null || previewState.g.atn == null) {
+            return;
+        }
         DecisionState decisionState = previewState.g.atn.getDecisionState(decision);
+        if (decisionState == null) {
+            return;
+        }
         Interval region = previewState.g.getStateToGrammarRegion(decisionState.stateNumber);
         if (region == null) {
             System.err.println("decision " + decision + " has state " + decisionState.stateNumber + " but no region");
             return;
         }
 
-        InputPanel.removeHighlighters(grammarEditor, ProfilerPanel.DECISION_INFO_KEY);
-
         org.antlr.runtime.TokenStream tokens = previewState.g.tokenStream;
-        if (region.a >= tokens.size() || region.b >= tokens.size()) {
+        // region.a/b can be -1 when ATN state has no grammar mapping (#260)
+        if (tokens == null || region.a < 0 || region.b < 0
+                || region.a >= tokens.size() || region.b >= tokens.size()) {
             return;
         }
         CommonToken startToken = (CommonToken) tokens.get(region.a);
         CommonToken stopToken = (CommonToken) tokens.get(region.b);
+
+        // #372: open/highlight the grammar file that owns the token (imports / multi-file)
+        VirtualFile targetFile = resolveGrammarFileForToken(previewState, startToken);
+        Editor grammarEditor = controller.getEditor(targetFile);
+        if (grammarEditor == null && targetFile != null) {
+            com.intellij.openapi.fileEditor.FileEditorManager.getInstance(previewState.project)
+                    .openFile(targetFile, true);
+            grammarEditor = controller.getEditor(targetFile);
+        }
+        if (grammarEditor == null) {
+            return;
+        }
+
+        InputPanel.removeHighlighters(grammarEditor, ProfilerPanel.DECISION_INFO_KEY);
+
         JBColor effectColor = JBColor.darkGray;
-        if (previewState.parsingResult != null) {
-            DecisionInfo decisionInfo = previewState.parsingResult.parser.getParseInfo().getDecisionInfo()[decision];
-            if (!decisionInfo.predicateEvals.isEmpty()) {
-                effectColor = new JBColor(PREDEVAL_COLOR, AMBIGUITY_COLOR);
+        if (previewState.parsingResult != null && previewState.parsingResult.parser != null) {
+            DecisionInfo[] infos = previewState.parsingResult.parser.getParseInfo().getDecisionInfo();
+            if (decision >= 0 && decision < infos.length) {
+                DecisionInfo decisionInfo = infos[decision];
+                if (!decisionInfo.predicateEvals.isEmpty()) {
+                    effectColor = new JBColor(PREDEVAL_COLOR, AMBIGUITY_COLOR);
+                }
+                if (!decisionInfo.contextSensitivities.isEmpty()) {
+                    effectColor = new JBColor(FULLCTX_COLOR, AMBIGUITY_COLOR);
+                }
+                if (!decisionInfo.ambiguities.isEmpty()) {
+                    effectColor = new JBColor(AMBIGUITY_COLOR, AMBIGUITY_COLOR);
+                }
+                TextAttributes attr =
+                        new TextAttributes(JBColor.BLACK, JBColor.WHITE, effectColor,
+                                EffectType.ROUNDED_BOX, Font.PLAIN);
+                MarkupModel markupModel = grammarEditor.getMarkupModel();
+                final RangeHighlighter rangeHighlighter = markupModel.addRangeHighlighter(
+                        startToken.getStartIndex(),
+                        stopToken.getStopIndex() + 1,
+                        HighlighterLayer.SELECTION, // layer
+                        attr,
+                        HighlighterTargetArea.EXACT_RANGE
+                );
+                rangeHighlighter.putUserData(DECISION_INFO_KEY, decisionInfo);
             }
-            if (!decisionInfo.contextSensitivities.isEmpty()) {
-                effectColor = new JBColor(FULLCTX_COLOR, AMBIGUITY_COLOR);
-            }
-            if (!decisionInfo.ambiguities.isEmpty()) {
-                effectColor = new JBColor(AMBIGUITY_COLOR, AMBIGUITY_COLOR);
-            }
-            TextAttributes attr =
-                    new TextAttributes(JBColor.BLACK, JBColor.WHITE, effectColor,
-                            EffectType.ROUNDED_BOX, Font.PLAIN);
-            MarkupModel markupModel = grammarEditor.getMarkupModel();
-            final RangeHighlighter rangeHighlighter = markupModel.addRangeHighlighter(
-                    startToken.getStartIndex(),
-                    stopToken.getStopIndex() + 1,
-                    HighlighterLayer.SELECTION, // layer
-                    attr,
-                    HighlighterTargetArea.EXACT_RANGE
-            );
-            rangeHighlighter.putUserData(DECISION_INFO_KEY, decisionInfo);
         }
         ScrollingModel scrollingModel = grammarEditor.getScrollingModel();
         CaretModel caretModel = grammarEditor.getCaretModel();
         caretModel.moveToOffset(startToken.getStartIndex());
         scrollingModel.scrollToCaret(ScrollType.MAKE_VISIBLE);
+    }
+
+    @Nullable
+    private static VirtualFile resolveGrammarFileForToken(PreviewState previewState, CommonToken token) {
+        if (token != null && token.getInputStream() != null) {
+            String sourceName = token.getInputStream().getSourceName();
+            if (sourceName != null && !sourceName.isBlank()) {
+                VirtualFile vf = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                        .findFileByPath(sourceName);
+                if (vf == null) {
+                    vf = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                            .findFileByIoFile(new java.io.File(sourceName));
+                }
+                if (vf != null) {
+                    return vf;
+                }
+            }
+        }
+        return previewState.grammarFile;
     }
 
     public void highlightInputPhrases(PreviewState previewState, int decision) {
@@ -350,10 +410,12 @@ public class ProfilerPanel {
             if (decisionInfo.LL_MaxLook > decisionInfo.SLL_MaxLook) {
                 maxLookEvent = decisionInfo.LL_MaxLookEvent;
             }
-            firstToken = addDecisionEventHighlighter(previewState, markupModel,
-                    maxLookEvent,
-                    DEEPESTLOOK_COLOR,
-                    EffectType.BOLD_DOTTED_LINE);
+            if (maxLookEvent != null) {
+                firstToken = addDecisionEventHighlighter(previewState, markupModel,
+                        maxLookEvent,
+                        DEEPESTLOOK_COLOR,
+                        EffectType.BOLD_DOTTED_LINE);
+            }
         }
 
         // pred evals
@@ -383,7 +445,14 @@ public class ProfilerPanel {
     public Token addDecisionEventHighlighter(PreviewState previewState, MarkupModel markupModel,
                                              DecisionEventInfo info, Color errorStripeColor,
                                              EffectType effectType) {
+        if (info == null || previewState.parsingResult == null || previewState.parsingResult.parser == null) {
+            return null;
+        }
         TokenStream tokens = previewState.parsingResult.parser.getInputStream();
+        if (tokens == null || info.startIndex < 0 || info.stopIndex < 0
+                || info.startIndex >= tokens.size() || info.stopIndex >= tokens.size()) {
+            return null;
+        }
         Token startToken = tokens.get(info.startIndex);
         Token stopToken = tokens.get(info.stopIndex);
         TextAttributes textAttributes =
@@ -406,6 +475,9 @@ public class ProfilerPanel {
                                                          int alt,
                                                          boolean result) {
         Grammar g = previewState.g;
+        if (g == null) {
+            return String.valueOf(semctx);
+        }
         String semanticContextDisplayString = g.getSemanticContextDisplayString(semctx);
         if (semctx instanceof SemanticContext.PrecedencePredicate) {
             int ruleIndex = previewState.parsingResult.parser.getATN().decisionToState.get(pred.decision).ruleIndex;
@@ -474,7 +546,7 @@ public class ProfilerPanel {
                         int decision = profilerDataTable.convertRowIndexToModel(selectedRow);
                         if (previewState.g != null) {
                             int numberOfDecisions = previewState.g.atn.getNumberOfDecisions();
-                            if (decision <= numberOfDecisions) {
+                            if (decision >= 0 && decision < numberOfDecisions) {
                                 selectDecisionInGrammar(previewState, decision);
                                 highlightInputPhrases(previewState, decision);
                             }

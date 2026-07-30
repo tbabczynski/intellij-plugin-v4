@@ -41,7 +41,8 @@ class ParseTreeContextualMenu {
 
     private static JMenuItem createExportMenuItem(ParseTreeGraphView parseTreeViewer, String label, boolean useTransparentBackground) {
         JMenuItem item = new JMenuItem(label);
-        boolean isMacNativSaveDialog = SystemInfo.isMac && Registry.is("ide.mac.native.save.dialog");
+        // #251: Registry key removed/renamed on some IDE builds — never throw from menu construction
+        boolean isMacNativSaveDialog = isMacNativeSaveDialog();
 
         item.addActionListener(event -> {
             String[] extensions = useTransparentBackground ? new String[]{"png", "svg"} : new String[]{"png", "jpg", "svg"};
@@ -69,6 +70,17 @@ class ParseTreeContextualMenu {
         });
 
         return item;
+    }
+
+    private static boolean isMacNativeSaveDialog() {
+        if (!SystemInfo.isMac) {
+            return false;
+        }
+        try {
+            return Registry.is("ide.mac.native.save.dialog");
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private static void exportToImage(ParseTreeGraphView parseTreeViewer, File file, boolean useTransparentBackground, String imageFormat) {

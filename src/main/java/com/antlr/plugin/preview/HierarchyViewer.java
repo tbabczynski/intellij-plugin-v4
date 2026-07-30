@@ -27,6 +27,8 @@ public class HierarchyViewer extends JPanel implements TreeSelectionListener {
     private final List<ParsingResultSelectionListener> selectionListeners = new ArrayList<>();
 
     private TreeTextProvider treeTextProvider;
+    /** True while {@link #selectNodeAtOffset} updates selection (avoid feedback into the input pane). */
+    private boolean suppressSelectionCallback;
 
     HierarchyViewer(Tree tree) {
         setupComponents();
@@ -59,7 +61,12 @@ public class HierarchyViewer extends JPanel implements TreeSelectionListener {
     }
 
     public void setTree(Tree tree) {
-        myTree.setModel(new DefaultTreeModel(wrap(tree), false));
+        MutableTreeNode root = wrap(tree);
+        // #494: never install a null-root model (keyboard nav NPEs on empty preview)
+        if (root == null) {
+            root = new DefaultMutableTreeNode("No parse tree");
+        }
+        myTree.setModel(new DefaultTreeModel(root, false));
     }
 
     public void setRuleNames(List<String> ruleNames) {
@@ -90,19 +97,33 @@ public class HierarchyViewer extends JPanel implements TreeSelectionListener {
     }
 
     public void selectNodeAtOffset(int offset) {
-        DefaultMutableTreeNode root = (DefaultMutableTreeNode) myTree.getModel().getRoot();
-        if (root == null) {
-            return; // probably because the grammar is not valid
+        Object rootObj = myTree.getModel().getRoot();
+        if (!(rootObj instanceof DefaultMutableTreeNode root)) {
+            return;
         }
-        Tree tree = (Tree) root.getUserObject();
+        Object userObject = root.getUserObject();
+        if (!(userObject instanceof Tree tree)) {
+            return;
+        }
 
         if (tree instanceof ParseTree) {
             DefaultMutableTreeNode atOffset = getNodeAtOffset(root, offset);
 
             if (atOffset != null) {
                 TreePath path = new TreePath(atOffset.getPath());
-                myTree.getSelectionModel().setSelectionPath(path);
-                myTree.scrollPathToVisible(path);
+                // #726: ensure collapsed ancestors are expanded before selecting
+                TreePath expand = new TreePath(path.getPathComponent(0));
+                for (int i = 1; i < path.getPathCount() - 1; i++) {
+                    expand = expand.pathByAddingChild(path.getPathComponent(i));
+                    myTree.expandPath(expand);
+                }
+                suppressSelectionCallback = true;
+                try {
+                    myTree.getSelectionModel().setSelectionPath(path);
+                    myTree.scrollPathToVisible(path);
+                } finally {
+                    suppressSelectionCallback = false;
+                }
             }
         }
     }
@@ -144,20 +165,28 @@ public class HierarchyViewer extends JPanel implements TreeSelectionListener {
 
     /**
      * Fired when a rule is selected in the tree to highlight the corresponding text in the input editor.
+     * Uses {@link #suppressSelectionCallback} instead of {@link EventQueue#getCurrentEvent()}: the latter
+     * is often null or a non-Tree event by the time selection is applied, so Hierarchy clicks stopped
+     * updating / scrolling the preview input.
      */
     @Override
     public void valueChanged(TreeSelectionEvent e) {
-        AWTEvent currentEvent = EventQueue.getCurrentEvent();
-        if (currentEvent==null ||  !(currentEvent.getSource() instanceof com.intellij.ui.treeStructure.Tree)) {
-            // Do not try to highlight input unless we got a mouse event in the hierarchy viewer
-            // otherwise it selects entire token when you click in the input pane. E.g., an
-            // entire string or keyword when you're trying to click-n-edit in input pane.
+        if (suppressSelectionCallback || !e.isAddedPath()) {
             return;
         }
 
         TreePath path = e.getPath();
-        DefaultMutableTreeNode node = (DefaultMutableTreeNode) path.getLastPathComponent();
-        Tree tree = (Tree) node.getUserObject();
+        if (path == null) {
+            return;
+        }
+        Object last = path.getLastPathComponent();
+        if (!(last instanceof DefaultMutableTreeNode node)) {
+            return;
+        }
+        Object userObject = node.getUserObject();
+        if (!(userObject instanceof Tree tree)) {
+            return;
+        }
 
         for (ParsingResultSelectionListener listener : selectionListeners) {
             listener.onParserRuleSelected(tree);

@@ -1,14 +1,21 @@
 package com.antlr.plugin.resolve;
 
 import com.intellij.lang.ASTNode;
-import com.intellij.psi.PsiDirectory;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.antlr.plugin.ANTLRv4FileRoot;
+import com.antlr.plugin.configdialogs.ANTLRv4GrammarProperties;
+import com.antlr.plugin.configdialogs.ANTLRv4ToolGrammarPropertiesStore;
 import com.antlr.plugin.parser.ANTLRv4Parser;
 import com.antlr.plugin.psi.*;
 import org.jetbrains.annotations.Nullable;
+
+import java.io.File;
 
 import static com.antlr.plugin.ANTLRv4TokenTypes.RULE_ELEMENT_TYPES;
 
@@ -78,19 +85,82 @@ public class TokenVocabResolver {
     }
 
     /**
-     * Looks for an ANTLR grammar file named {@code <baseName>}.g4 next to the given {@code sibling} file.
+     * Looks for an ANTLR grammar file named {@code <baseName>}.g4 next to the given {@code sibling}
+     * file, then in the configured {@code -lib} directory.
      */
-    static PsiFile findRelativeFile(String baseName, PsiFile sibling) {
-        PsiDirectory parentDirectory = sibling.getParent();
+    @Nullable
+    public static PsiFile findRelativeFile(String baseName, PsiFile sibling) {
+        if (sibling == null) {
+            return null;
+        }
+        VirtualFile found = findGrammarFile(baseName, sibling.getVirtualFile(), sibling.getProject());
+        return asGrammarFile(sibling.getProject(), found);
+    }
 
-        if (parentDirectory != null) {
-            PsiFile candidate = parentDirectory.findFile(baseName + ".g4");
+    /**
+     * Resolve {@code baseName} (with or without {@code .g4}) beside {@code siblingFile}, under a relative
+     * subdirectory, or in the grammar's configured {@code -lib} directory.
+     */
+    @Nullable
+    public static VirtualFile findGrammarFile(String baseName, @Nullable VirtualFile siblingFile, Project project) {
+        if (baseName == null || baseName.isBlank()) {
+            return null;
+        }
 
-            if (candidate instanceof ANTLRv4FileRoot) {
-                return candidate;
+        String fileName = baseName.endsWith(".g4") ? baseName : baseName + ".g4";
+        String normalized = fileName.replace('\\', '/');
+        int slash = normalized.lastIndexOf('/');
+        String simpleName = slash >= 0 ? normalized.substring(slash + 1) : normalized;
+        String relativeDir = slash >= 0 ? normalized.substring(0, slash) : null;
+
+        if (siblingFile != null) {
+            VirtualFile parent = siblingFile.isDirectory() ? siblingFile : siblingFile.getParent();
+            if (parent != null) {
+                if (relativeDir != null) {
+                    VirtualFile dir = parent.findFileByRelativePath(relativeDir);
+                    if (dir != null && dir.isDirectory()) {
+                        VirtualFile vf = dir.findChild(simpleName);
+                        if (vf != null && vf.exists()) {
+                            return vf;
+                        }
+                    }
+                } else {
+                    VirtualFile vf = parent.findChild(simpleName);
+                    if (vf != null && vf.exists()) {
+                        return vf;
+                    }
+                }
+            }
+        }
+
+        if (project != null && siblingFile != null) {
+            VirtualFile propsFile = siblingFile.isDirectory() ? siblingFile : siblingFile;
+            ANTLRv4GrammarProperties props =
+                    ANTLRv4ToolGrammarPropertiesStore.getGrammarProperties(project, propsFile);
+            String defaultLib = siblingFile.getParent() != null
+                    ? siblingFile.getParent().getPath()
+                    : siblingFile.getPath();
+            String libDir = props.resolveLibDir(project, defaultLib);
+            if (libDir != null && !libDir.isBlank()) {
+                File candidateFile = relativeDir != null
+                        ? new File(new File(libDir, relativeDir), simpleName)
+                        : new File(libDir, simpleName);
+                VirtualFile vf = LocalFileSystem.getInstance().findFileByIoFile(candidateFile);
+                if (vf != null && vf.exists()) {
+                    return vf;
+                }
             }
         }
 
         return null;
+    }
+
+    @Nullable
+    private static PsiFile asGrammarFile(Project project, @Nullable VirtualFile vf) {
+        if (project == null || vf == null || !vf.isValid()) {
+            return null;
+        }
+        PsiFile psi = PsiManager.getInstance(project).findFile(vf);
+        return psi instanceof ANTLRv4FileRoot ? psi : null;
     }
 }

@@ -1,5 +1,6 @@
 package com.antlr.plugin.psi;
 
+import com.antlr.plugin.ANTLRv4FileRoot;
 import com.antlr.plugin.ANTLRv4TokenTypes;
 import com.antlr.plugin.parser.ANTLRv4Lexer;
 import com.antlr.plugin.resolve.ImportResolver;
@@ -15,7 +16,11 @@ import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * A reference to a grammar element (parser rule, lexer rule or lexical mode).
@@ -40,12 +45,63 @@ public class GrammarElementRef extends PsiReferenceBase<GrammarElementRefNode> {
         if (grammar == null) {
             return new Object[0];
         }
-        // Search whole grammar so refs inside modes / tokens / channels also complete
-        Collection<? extends RuleSpecNode> ruleSpecNodes =
-                PsiTreeUtil.findChildrenOfAnyType(grammar,
-                        ParserRuleSpecNode.class, LexerRuleSpecNode.class, ModeSpecNode.class,
-                        TokenSpecNode.class, ChannelSpecNode.class);
-        return ruleSpecNodes.toArray();
+        Set<PsiElement> variants = new LinkedHashSet<>();
+        collectLocalSpecs(grammar, variants);
+
+        PsiFile containingFile = myElement.getContainingFile();
+        if (containingFile != null) {
+            List<PsiFile> visited = new ArrayList<>();
+            visited.add(containingFile);
+            collectImportedSpecs(containingFile, variants, visited);
+
+            if (containingFile instanceof ANTLRv4FileRoot) {
+                String tokenVocab = MyPsiUtils.findTokenVocabIfAny((ANTLRv4FileRoot) containingFile);
+                if (tokenVocab != null) {
+                    PsiFile tokenVocabFile = TokenVocabResolver.findRelativeFile(tokenVocab, containingFile);
+                    collectTokenVocabSpecs(tokenVocabFile, variants);
+                }
+            }
+        }
+        return variants.toArray();
+    }
+
+    private static void collectLocalSpecs(@Nullable GrammarSpecNode grammar, Collection<PsiElement> out) {
+        if (grammar == null) {
+            return;
+        }
+        out.addAll(PsiTreeUtil.findChildrenOfAnyType(grammar,
+                ParserRuleSpecNode.class, LexerRuleSpecNode.class, ModeSpecNode.class,
+                TokenSpecNode.class, ChannelSpecNode.class));
+    }
+
+    private static void collectImportedSpecs(PsiFile grammarFile,
+                                             Collection<PsiElement> out,
+                                             List<PsiFile> visited) {
+        for (PsiFile imported : ImportResolver.collectImportedFiles(grammarFile)) {
+            if (visited.contains(imported)) {
+                continue;
+            }
+            visited.add(imported);
+            GrammarSpecNode importedGrammar = PsiTreeUtil.getChildOfType(imported, GrammarSpecNode.class);
+            collectLocalSpecs(importedGrammar, out);
+            collectImportedSpecs(imported, out, visited);
+        }
+    }
+
+    private static void collectTokenVocabSpecs(@Nullable PsiFile tokenVocabFile, Collection<PsiElement> out) {
+        if (tokenVocabFile == null) {
+            return;
+        }
+        GrammarSpecNode lexerGrammar = PsiTreeUtil.findChildOfType(tokenVocabFile, GrammarSpecNode.class);
+        if (lexerGrammar == null) {
+            return;
+        }
+        for (LexerRuleSpecNode node : PsiTreeUtil.findChildrenOfType(lexerGrammar, LexerRuleSpecNode.class)) {
+            if (!node.isFragment()) {
+                out.add(node);
+            }
+        }
+        out.addAll(PsiTreeUtil.findChildrenOfType(lexerGrammar, TokenSpecNode.class));
     }
 
     /**

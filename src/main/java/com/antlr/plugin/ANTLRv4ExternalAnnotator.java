@@ -3,6 +3,7 @@ package com.antlr.plugin;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.lang.annotation.*;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
@@ -23,6 +24,8 @@ import java.util.List;
 import java.util.Optional;
 
 public class ANTLRv4ExternalAnnotator extends ExternalAnnotator<PsiFile, List<GrammarIssue>> {
+
+    private static final Key<Long> LAST_PREVIEW_REFRESH_STAMP = Key.create("antlr.lastPreviewRefreshStamp");
 
     /**
      * Called first; return file
@@ -67,6 +70,13 @@ public class ANTLRv4ExternalAnnotator extends ExternalAnnotator<PsiFile, List<Gr
                 && !file.getProject().isDisposed()) {
             VirtualFile vFile = file.getVirtualFile();
             if (vFile != null) {
+                // #702: only refresh preview when the document actually changed
+                long stamp = file.getModificationStamp();
+                Long last = file.getUserData(LAST_PREVIEW_REFRESH_STAMP);
+                if (last != null && last == stamp) {
+                    return;
+                }
+                file.putUserData(LAST_PREVIEW_REFRESH_STAMP, stamp);
                 // Defer preview refresh so annotation apply stays lightweight on the EDT
                 ApplicationManager.getApplication().invokeLater(
                         () -> {

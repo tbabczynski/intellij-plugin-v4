@@ -25,7 +25,7 @@ import org.jetbrains.annotations.Nullable;
  * shared ToolWindowFactory instance cannot cross-wire multi-project events.
  */
 public class PreViewToolWindow implements ToolWindowFactory, DumbAware {
-    public static final String WINDOW_ID = "Antlr Tool Preview";
+    public static final String WINDOW_ID = "ANTLR Preview";
     public static final Topic<PreViewListener> TOPIC = new Topic<>(PreViewListener.class);
     private static final Key<PreviewPanel> PREVIEW_PANEL_KEY = Key.create("antlr.tool.preview.panel");
 

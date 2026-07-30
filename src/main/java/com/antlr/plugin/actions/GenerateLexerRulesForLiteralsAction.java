@@ -38,7 +38,7 @@ public class GenerateLexerRulesForLiteralsAction extends AnAction {
         return ActionUpdateThread.BGT;
     }
 
-    /** Only show if selection is a literal */
+    /** Enable when caret is on a string literal inside a grammar editor. */
     @Override
     public void update(AnActionEvent e) {
         Presentation presentation = e.getPresentation();
@@ -51,11 +51,16 @@ public class GenerateLexerRulesForLiteralsAction extends AnAction {
             return;
         }
         PsiElement selectedElement = BaseRefactoringAction.getElementAtCaret(editor, file);
-        if (selectedElement == null) { // we clicked somewhere outside text
+        if (selectedElement == null) {
             presentation.setEnabled(false);
             return;
         }
-        presentation.setEnabled(true);
+        presentation.setEnabled(isStringLiteral(selectedElement));
+    }
+
+    private static boolean isStringLiteral(PsiElement element) {
+        String text = element.getText();
+        return text != null && text.length() >= 2 && text.charAt(0) == '\'' && text.charAt(text.length() - 1) == '\'';
     }
 
     @Override

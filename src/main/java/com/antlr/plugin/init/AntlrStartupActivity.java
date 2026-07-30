@@ -2,9 +2,7 @@ package com.antlr.plugin.init;
 
 import com.antlr.notify.NotifyClientKt;
 import com.antlr.plugin.ANTLRv4PluginController;
-import com.intellij.ide.plugins.IdeaPluginDescriptor;
-import com.intellij.ide.plugins.PluginManager;
-import com.intellij.ide.plugins.PluginManagerCore;
+import com.antlr.plugin.util.PluginDescriptorUtil;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -25,7 +23,7 @@ import java.util.List;
  * {@link ANTLRv4PluginController} as a disposable project service.
  */
 public class AntlrStartupActivity implements StartupActivity, DumbAware {
-    private static final List<String> plugins = List.of("org.antlr.intellij.plugin");
+    private static final List<String> CONFLICTING_PLUGINS = List.of("org.antlr.intellij.plugin");
 
     @Override
     public void runActivity(@NotNull Project project) {
@@ -39,11 +37,11 @@ public class AntlrStartupActivity implements StartupActivity, DumbAware {
             public void run(@NotNull ProgressIndicator indicator) {
                 boolean flag = false;
                 StringBuilder stringBuilder = new StringBuilder();
-                for (String id : plugins) {
+                for (String id : CONFLICTING_PLUGINS) {
                     PluginId pluginId = PluginId.getId(id);
-                    IdeaPluginDescriptor ideaPluginDescriptor = PluginManagerCore.getPlugin(pluginId);
-                    if (ideaPluginDescriptor != null && ideaPluginDescriptor.isEnabled()) {
-                        stringBuilder.append(ideaPluginDescriptor.getName());
+                    if (PluginDescriptorUtil.isPluginEnabled(pluginId)) {
+                        String name = PluginDescriptorUtil.getPluginName(pluginId);
+                        stringBuilder.append(name != null ? name : id);
                         stringBuilder.append(",");
                         flag = true;
                     }
@@ -52,7 +50,15 @@ public class AntlrStartupActivity implements StartupActivity, DumbAware {
                     stringBuilder.delete(stringBuilder.length() - 1, stringBuilder.length());
                 }
                 if (flag) {
-                    NotifyClientKt.notifyConflictsWarning(project, "<html>The plug-ins are below [" + stringBuilder + "] These plug-ins may conflict, please uninstall or disable for maximum experience</html>", Arrays.asList(new DisablePluginAction("Disable plugin"), new DisableAndRestartPluginAction("Disable the plugin and restart")));
+                    NotifyClientKt.notifyConflictsWarning(
+                            project,
+                            "<html>The plug-ins are below [" + stringBuilder
+                                    + "] These plug-ins may conflict, please uninstall or disable for maximum experience</html>",
+                            Arrays.asList(
+                                    new DisablePluginAction("Disable plugin"),
+                                    new DisableAndRestartPluginAction("Disable the plugin and restart")
+                            )
+                    );
                 }
             }
         }.queue();
@@ -71,8 +77,8 @@ public class AntlrStartupActivity implements StartupActivity, DumbAware {
     }
 
     private static void disablePlugin(@NotNull Notification notification) {
-        for (String id : plugins) {
-            PluginManager.disablePlugin(id);
+        for (String id : CONFLICTING_PLUGINS) {
+            PluginDescriptorUtil.disablePlugin(id);
         }
         notification.expire();
     }

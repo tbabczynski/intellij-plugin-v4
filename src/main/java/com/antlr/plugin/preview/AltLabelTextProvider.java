@@ -43,7 +43,21 @@ public class AltLabelTextProvider implements TreeTextProvider {
     @Override
     public String getText(Tree node) {
         if (node instanceof PreviewInterpreterRuleContext inode) {
-            Rule r = g.getRule(inode.getRuleIndex());
+            // #262: ruleIndex can be out of range when grammar/preview ATN are out of sync
+            int ruleIndex = inode.getRuleIndex();
+            String[] ruleNames = parser.getRuleNames();
+            if (ruleIndex < 0 || ruleNames == null || ruleIndex >= ruleNames.length || g == null) {
+                return Trees.getNodeText(node, ruleNames != null ? Arrays.asList(ruleNames) : List.of());
+            }
+            Rule r;
+            try {
+                r = g.getRule(ruleIndex);
+            } catch (IndexOutOfBoundsException ex) {
+                return ruleNames[ruleIndex];
+            }
+            if (r == null) {
+                return ruleNames[ruleIndex];
+            }
             String[] altLabels = getAltLabels(r);
             String name = r.name;
             int outerAltNum = inode.getOuterAltNum();

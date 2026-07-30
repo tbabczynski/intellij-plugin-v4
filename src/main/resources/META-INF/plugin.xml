@@ -1,13 +1,14 @@
 <idea-plugin>
     <id>com.my.antlr.tool</id>
-    <name>ANTLR V4-Tool</name>
+    <name>ANTLR v4 Grammar</name>
     <version>will be replaced by gradle</version>
     <vendor email="zoulejiu@gmail.com" url="https://github.com/mbtsp/intellij-plugin-v4">LeJiu</vendor>
 
     <description><![CDATA[
   <p>
       This plugin is for ANTLR v4 grammars and includes ANTLR 4.13.2. It works with
-      IntelliJ IDEA 2022.2 and above. It should work in other JetBrains IDEs.
+      IntelliJ IDEA 2023.1 and above (see plugin since-build). It should work in other JetBrains IDEs.
+      Do not install alongside the official &quot;ANTLR v4&quot; plugin if menus appear duplicated.
      </p>
 
      <ul>
@@ -164,15 +165,15 @@ For really big files and slow grammars, there is an appreciable delay when displ
                              contextId="ANTLR_OUTSIDE-Tool"/>
         <projectConfigurable groupId="language"
                              id="antlr.new.intellij.plugin.configdialogs.ANTLRv4ProjectSettings"
-                             displayName="ANTLR V4 Default Project Settings"
+                             displayName="ANTLR v4 Grammar"
                              instance="com.antlr.plugin.configdialogs.ANTLRv4ProjectSettings"/>
         <projectService id="antlr.new.antlr.grammar.properties.component"
                 serviceImplementation="com.antlr.plugin.configdialogs.ANTLRv4ToolGrammarPropertiesComponent"/>
         <lang.refactoringSupport  id="antlr.new.refactoring.support" language="ANTLRv4-Tool"
                                  implementationClass="com.antlr.plugin.refactor.ANTLRv4RefactoringSupport"/>
-        <toolWindow factoryClass="com.antlr.plugin.toolwindow.PreViewToolWindow" id="Antlr Tool Preview"
+        <toolWindow factoryClass="com.antlr.plugin.toolwindow.PreViewToolWindow" id="ANTLR Preview"
                     anchor="bottom"/>
-        <toolWindow factoryClass="com.antlr.plugin.toolwindow.ConsoleToolWindow" id="Antlr tool Console"
+        <toolWindow factoryClass="com.antlr.plugin.toolwindow.ConsoleToolWindow" id="ANTLR Console"
                     anchor="bottom"/>
         <notificationGroup displayType="BALLOON" id="antlr.new.notify.group"/>
         <errorHandler id="antlr.new.error.report" implementation="com.antlr.report.AnltrErrorReportSubmitter"/>

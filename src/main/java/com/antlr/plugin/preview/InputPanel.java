@@ -438,19 +438,42 @@ public class InputPanel {
             return;
         }
         for (SyntaxError e : errors) {
+            // #324: ParserInterpreter often reports spurious "extraneous input '<EOF>'"
+            if (isSpuriousEofError(e)) {
+                continue;
+            }
             annotateErrorsInPreviewInputEditor(e);
             displayErrorInParseErrorConsole(e);
         }
+    }
+
+    private static boolean isSpuriousEofError(SyntaxError e) {
+        Token offending = e.getOffendingSymbol();
+        if (offending == null || offending.getType() != Token.EOF) {
+            return false;
+        }
+        String msg = e.getMessage();
+        return msg != null && msg.toLowerCase().contains("extraneous input");
     }
 
     /**
      * Show token information if the ctrl-key is down and mouse movement occurs
      */
     public void showTokenInfoUponCtrlKey(Editor editor, PreviewState previewState, int offset) {
+        // #261: lexer-only / not-yet-loaded grammars have g == null
+        if (previewState == null || previewState.parsingResult == null) {
+            return;
+        }
+        org.antlr.v4.tool.Grammar grammar = previewState.getMainGrammar();
+        if (grammar == null) {
+            return;
+        }
         Token tokenUnderCursor = ParsingUtils.getTokenUnderCursor(previewState, offset);
         if (tokenUnderCursor == null) {
-            PreviewParser parser = (PreviewParser) previewState.parsingResult.parser;
-            CommonTokenStream tokenStream = (CommonTokenStream) parser.getInputStream();
+            CommonTokenStream tokenStream = previewState.parsingResult.getTokenStream();
+            if (tokenStream == null) {
+                return;
+            }
             tokenUnderCursor = ParsingUtils.getSkippedTokenUnderCursor(tokenStream, offset);
         }
 
@@ -468,7 +491,7 @@ public class InputPanel {
         String tokenInfo =
                 String.format("#%d Type %s, Line %d:%d%s",
                         tokenUnderCursor.getTokenIndex(),
-                        previewState.g.getTokenDisplayName(tokenUnderCursor.getType()),
+                        grammar.getTokenDisplayName(tokenUnderCursor.getType()),
                         tokenUnderCursor.getLine(),
                         tokenUnderCursor.getCharPositionInLine(),
                         channelInfo
@@ -489,6 +512,10 @@ public class InputPanel {
      * if the alt-key is down and mouse movement occurs.
      */
     public void showParseRegion(Editor editor, PreviewState previewState, int offset) {
+        if (previewState == null || previewState.parsingResult == null
+                || !(previewState.parsingResult.parser instanceof PreviewParser)) {
+            return;
+        }
         Token tokenUnderCursor = ParsingUtils.getTokenUnderCursor(previewState, offset);
         if (tokenUnderCursor == null) {
             return;
@@ -503,9 +530,19 @@ public class InputPanel {
         }
 
         PreviewParser parser = (PreviewParser) previewState.parsingResult.parser;
-        CommonTokenStream tokenStream = (CommonTokenStream) parser.getInputStream();
+        CommonTokenStream tokenStream = previewState.parsingResult.getTokenStream();
+        if (tokenStream == null) {
+            return;
+        }
         ParserRuleContext parent = (ParserRuleContext) nodeWithToken.getParent();
+        if (parent == null) {
+            return;
+        }
         Interval tokenInterval = parent.getSourceInterval();
+        if (tokenInterval == null || tokenInterval.a < 0 || tokenInterval.b < 0
+                || tokenInterval.a >= tokenStream.size() || tokenInterval.b >= tokenStream.size()) {
+            return;
+        }
         Token startToken = tokenStream.get(tokenInterval.a);
         Token stopToken = tokenStream.get(tokenInterval.b);
         Interval sourceInterval =
@@ -546,30 +583,44 @@ public class InputPanel {
                                       Interval sourceInterval,
                                       JBColor color,
                                       EffectType effectType, String hintText) {
+        if (editor == null || editor.isDisposed() || sourceInterval == null) {
+            return;
+        }
         CaretModel caretModel = editor.getCaretModel();
         final TextAttributes attr = new TextAttributes();
         attr.setForegroundColor(color);
         attr.setEffectColor(color);
         attr.setEffectType(effectType);
         MarkupModel markupModel = editor.getMarkupModel();
-        markupModel.addRangeHighlighter(
-                sourceInterval.a,
-                sourceInterval.b,
-                InputPanel.TOKEN_INFO_LAYER, // layer
-                attr,
-                HighlighterTargetArea.EXACT_RANGE
-        );
+        // #214: token intervals can outlive the current document length after edits
+        int docLen = editor.getDocument().getTextLength();
+        int start = Math.max(0, Math.min(sourceInterval.a, docLen));
+        int end = Math.max(start, Math.min(sourceInterval.b, docLen));
+        if (start < end) {
+            markupModel.addRangeHighlighter(
+                    start,
+                    end,
+                    InputPanel.TOKEN_INFO_LAYER, // layer
+                    attr,
+                    HighlighterTargetArea.EXACT_RANGE
+            );
+        }
 
         if (hintText.contains("<")) {
             hintText = hintText.replaceAll("<", "&lt;");
         }
 
         // HINT
-        caretModel.moveToOffset(offset); // info tooltip only shows at cursor :(
+        int hintOffset = Math.max(0, Math.min(offset, docLen));
+        caretModel.moveToOffset(hintOffset); // info tooltip only shows at cursor :(
         HintManager.getInstance().showInformationHint(editor, hintText);
     }
 
     public void setCursorToGrammarElement(Project project, PreviewState previewState, int offset) {
+        if (previewState == null || previewState.parsingResult == null || previewState.g == null
+                || !(previewState.parsingResult.parser instanceof PreviewParser)) {
+            return;
+        }
         Token tokenUnderCursor = ParsingUtils.getTokenUnderCursor(previewState, offset);
         if (tokenUnderCursor == null) {
             return;
@@ -583,18 +634,28 @@ public class InputPanel {
         }
 
         Interval region = previewState.g.getStateToGrammarRegion(atnState);
+        if (region == null || region.a < 0 || previewState.g.tokenStream == null
+                || region.a >= previewState.g.tokenStream.size()) {
+            return;
+        }
         CommonToken token =
                 (CommonToken) previewState.g.tokenStream.get(region.a);
         jumpToGrammarPosition(project, token.getStartIndex());
     }
 
     public void setCursorToGrammarRule(Project project, PreviewState previewState, int offset) {
+        if (previewState == null || previewState.parsingResult == null || previewState.g == null) {
+            return;
+        }
         Token tokenUnderCursor = ParsingUtils.getTokenUnderCursor(previewState, offset);
         if (tokenUnderCursor == null) {
             return;
         }
 
         ParseTree tree = previewState.parsingResult.tree;
+        if (tree == null) {
+            return;
+        }
         TerminalNode nodeWithToken =
                 (TerminalNode) ParsingUtils.getParseTreeNodeWithToken(tree, tokenUnderCursor);
         if (nodeWithToken == null) {

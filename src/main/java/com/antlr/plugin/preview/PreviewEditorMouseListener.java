@@ -43,6 +43,11 @@ class PreviewEditorMouseListener implements EditorMouseListener, EditorMouseMoti
         }
 
         MouseEvent mouseEvent = e.getMouseEvent();
+        if (inputPanel.previewState.parsingResult == null) {
+            inputPanel.setCursorToHierarchyViewElement(offset);
+            InputPanel.clearDecisionEventHighlighters(editor);
+            return;
+        }
         if (mouseEvent.isControlDown()) {
             inputPanel.setCursorToGrammarElement(e.getEditor().getProject(), inputPanel.previewState, offset);
             inputPanel.setCursorToHierarchyViewElement(offset);

@@ -71,29 +71,33 @@ public class ANTLRv4FoldingBuilder extends CustomFoldingBuilder {
 
     private static void addTokensFoldingDescriptor(List<FoldingDescriptor> descriptors, PsiElement root) {
         PsiElement tokensSpec = MyPsiUtils.findFirstChildOfType(root, TOKENSSPEC);
-        if (tokensSpec != null) {
-            PsiElement tokens = tokensSpec.getFirstChild();
-            if (tokens.getNode().getElementType() == TOKENS) {
-                PsiElement rbrace = tokensSpec.getLastChild();
-                if (rbrace.getNode().getElementType() == RBRACE) {
-                    descriptors.add(new FoldingDescriptor(tokensSpec,
-                            new TextRange(tokens.getTextRange().getEndOffset(), rbrace.getTextRange().getEndOffset())));
-                }
-            }
+        if (tokensSpec == null) {
+            return;
+        }
+        PsiElement tokens = tokensSpec.getFirstChild();
+        PsiElement rbrace = tokensSpec.getLastChild();
+        if (tokens == null || rbrace == null || tokens.getNode() == null || rbrace.getNode() == null) {
+            return;
+        }
+        if (tokens.getNode().getElementType() == TOKENS && rbrace.getNode().getElementType() == RBRACE) {
+            descriptors.add(new FoldingDescriptor(tokensSpec,
+                    new TextRange(tokens.getTextRange().getEndOffset(), rbrace.getTextRange().getEndOffset())));
         }
     }
 
     private static void addOptionsFoldingDescriptor(List<FoldingDescriptor> descriptors, PsiElement root) {
         PsiElement optionsSpec = MyPsiUtils.findFirstChildOfType(root, OPTIONSSPEC);
-        if (optionsSpec != null) {
-            PsiElement options = optionsSpec.getFirstChild();
-            if (options.getNode().getElementType() == OPTIONS) {
-                PsiElement rbrace = optionsSpec.getLastChild();
-                if (rbrace.getNode().getElementType() == RBRACE) {
-                    descriptors.add(new FoldingDescriptor(optionsSpec,
-                            new TextRange(options.getTextRange().getEndOffset(), rbrace.getTextRange().getEndOffset())));
-                }
-            }
+        if (optionsSpec == null) {
+            return;
+        }
+        PsiElement options = optionsSpec.getFirstChild();
+        PsiElement rbrace = optionsSpec.getLastChild();
+        if (options == null || rbrace == null || options.getNode() == null || rbrace.getNode() == null) {
+            return;
+        }
+        if (options.getNode().getElementType() == OPTIONS && rbrace.getNode().getElementType() == RBRACE) {
+            descriptors.add(new FoldingDescriptor(optionsSpec,
+                    new TextRange(options.getTextRange().getEndOffset(), rbrace.getTextRange().getEndOffset())));
         }
     }
 

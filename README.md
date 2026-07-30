@@ -191,7 +191,7 @@ We [use Gradle](https://github.com/antlr/intellij-plugin-v4/pull/295) to build. 
 you need a recent version of IntelliJ IDEA (either Community or Ultimate) with the `Gradle` and `Plugin DevKit` 
 plugins enabled. 
 
-Use `File > Open` and select the `build.gradle` file to import the project. Once everything is imported, you can run a 
+Use `File > Open` and select the `build.gradle.kts` file to import the project. Once everything is imported, you can run a 
 sandboxed IDE using the `runIde` task, either from the `Gradle` tool window of from the CLI:
 
 ```
@@ -199,17 +199,15 @@ cd ~/antlr/code/intellij-plugin-v4
 ./gradlew runIde
 ```
 
+**Build requirements**
+- Use **JDK 17** for Gradle (`JAVA_HOME`). JDK 21+ IDEs are fine for running the plugin, but JDK 26 currently breaks the Gradle Kotlin DSL.
+- `antlr4-intellij-adaptor` and `report-issue` are still `*-SNAPSHOT` and resolve from `mavenLocal()` / `~/.m2`. Install those artifacts locally before a clean CI/build machine can compile.
+
 To launch unit tests, run `./gradlew check`.
 
 To build a zipped version of the plugin and its dependencies, run `./gradlew buildPlugin`.
 
-You can tweak the version of the IntelliJ platform used to build/test the plugin in `gradle.properties`, such as:
-
-```
-ideaVersion=IC-2020.2.2
-```
-
-As of 1.18, java 11 is assumed but you might get away with earlier java.
+You can tweak the IntelliJ platform used to build/test the plugin in `gradle.properties` (`platformVersion`).
 
 A high level description of how the plugin works can be found in `ARCHITECTURE.md`.
 

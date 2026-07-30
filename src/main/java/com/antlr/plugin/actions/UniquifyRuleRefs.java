@@ -1,7 +1,6 @@
 package com.antlr.plugin.actions;
 
 import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.application.Result;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -69,14 +68,10 @@ public class UniquifyRuleRefs extends AnAction {
         if (ruleDefNameNode == null) return;
 
         // alter rule refs and dup rules
-        WriteCommandAction setTextAction = new WriteCommandAction(project) {
-            @Override
-            protected void run(final Result result) {
+        // #741: WriteCommandAction is final on IJ 2026.2+
+        WriteCommandAction.runWriteCommandAction(project, () ->
                 // do in a single action so undo works in one go
-                dupRuleAndMakeRefsUnique(doc, ruleName, rrefNodes);
-            }
-        };
-        setTextAction.execute();
+                dupRuleAndMakeRefsUnique(doc, ruleName, rrefNodes));
     }
 
     public void dupRuleAndMakeRefsUnique(Document doc,
@@ -100,6 +95,9 @@ public class UniquifyRuleRefs extends AnAction {
         // reparse to find new rule location
         String grammarText = doc.getText();
         ParsingResult results = ParsingUtils.parseANTLRGrammar(grammarText);
+        if (results == null || results.parser == null || results.tree == null) {
+            return;
+        }
         Parser parser = results.parser;
         ParseTree tree = results.tree;
         CommonTokenStream tokens = (CommonTokenStream) parser.getTokenStream();
