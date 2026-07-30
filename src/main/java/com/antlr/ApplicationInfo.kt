@@ -5,12 +5,13 @@ import com.intellij.openapi.extensions.PluginId
 
 object ApplicationInfo {
     @JvmField
-    var PLUGIN_ID = "com.my.antlr.tool"
+    val PLUGIN_ID: String = "com.my.antlr.tool"
 
-    @JvmField
-    var VERSION = loadVersion()
-
-    private fun loadVersion(): String? {
+    /**
+     * Resolve on demand — must not run during {@code <clinit>} (PluginDetailsService is a service).
+     */
+    @JvmStatic
+    fun getVersion(): String? {
         return PluginDescriptorUtil.getPluginVersion(PluginId.getId(PLUGIN_ID))
     }
 }

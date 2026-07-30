@@ -6,6 +6,7 @@
 
 ### Fixed
 - Drop forced `StoreUtil.saveSettings` flush for grammar properties; rely on `PersistentStateComponent.getState()` (same pattern as other plugins; fixes IJ 2025.3+ binary incompatibility)
+- Resolve plugin version on demand instead of in `ApplicationInfo` class init (avoids PluginDetailsService during `<clinit>`)
 
 ## [2026.2.0]
 ### Changed

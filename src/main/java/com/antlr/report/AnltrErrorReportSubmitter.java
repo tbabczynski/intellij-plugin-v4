@@ -95,7 +95,7 @@ public class AnltrErrorReportSubmitter extends ErrorReportSubmitter {
         String id = md5(StringKt.title(event.getThrowableText()));
         stringBuilder.append(":warning:_`[Auto Generated Report]-=").append(id).append("=-`_").append("\n");
         stringBuilder.append("## Environments").append('\n');
-        stringBuilder.append("> **Plugin version: ").append(ApplicationInfo.VERSION).append("**").append("\n\n");
+        stringBuilder.append("> **Plugin version: ").append(ApplicationInfo.getVersion()).append("**").append("\n\n");
         ApplicationInfoEx applicationInfoEx = ApplicationInfoEx.getInstanceEx();
         String edition = ApplicationNamesInfo.getInstance().getEditionName();
         stringBuilder.append(applicationInfoEx.getFullApplicationName()).append("\"")
